@@ -1,0 +1,23 @@
+services:
+  web:
+    build: .
+    ports:
+      - "${HOST_PORT:-7880}:8000"
+    environment:
+      DATABASE_URL: "sqlite:////data/app.db"
+      VIDEO_DIR: "/data/videos"
+      THUMB_DIR: "/data/thumbs"
+      AUTH_ENABLED: "true"
+      ADMIN_USERNAME: "admin"
+      ADMIN_PASSWORD: "admin"
+      SECRET_KEY: "change-me-in-production"
+      TRANSCODE_ENABLED: "true"
+      TRANSCODE_CRF: "23"
+      TRANSCODE_PRESET: "medium"
+      TRANSCODE_TIMEOUT_SECONDS: "3600"
+      THUMBNAIL_TIMEOUT_SECONDS: "30"
+    volumes:
+      - videodata:/data
+
+volumes:
+  videodata:

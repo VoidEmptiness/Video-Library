@@ -1,0 +1,57 @@
+{% extends "_layout.html" %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">После загрузки</p>
+      <h1>Назначить теги</h1>
+    </div>
+    <a class="button secondary" href="/">На главную</a>
+  </section>
+
+  <section class="list upload-list">
+    {% for v in videos %}
+      <article class="upload-item">
+        <div class="thumb upload-thumb">
+          {% if v.thumbnail_path %}
+            <img loading="lazy" src="/thumb/{{ v.id }}" alt="" />
+          {% else %}
+            <div class="thumb-placeholder">VIDEO</div>
+          {% endif %}
+        </div>
+
+        <div class="upload-body">
+          <div class="video-meta">
+            <strong title="{{ v.original_name }}">{{ v.original_name|short_name }}</strong>
+            <span>ID {{ v.id }} · {{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
+          </div>
+
+          <form method="post" action="/videos/{{ v.id }}/tags" class="form-stack">
+            <input type="hidden" name="return_to" value="{{ return_to }}" />
+            {% if all_tags|length > 0 %}
+              <label class="field tag-search">
+                <span>Найти тег</span>
+                <input type="search" data-tag-search placeholder="Начните вводить название" autocomplete="off" />
+              </label>
+            {% endif %}
+            <div class="tags" data-tag-list>
+              {% for t in all_tags %}
+                <label class="pill" data-tag-name="{{ t.name|lower }}">
+                  <input type="checkbox" name="tag_ids" value="{{ t.id }}" {% if t in v.tags %}checked{% endif %} />
+                  <span>#{{ t.name }}</span>
+                </label>
+              {% endfor %}
+              {% if all_tags|length == 0 %}
+                <span class="empty-inline">Сначала создайте теги</span>
+              {% endif %}
+            </div>
+            <span class="empty-inline tag-search-empty" data-tag-empty hidden>Теги не найдены</span>
+            <div class="toolbar">
+              <button class="button" type="submit">Сохранить</button>
+              <a class="button secondary" href="/videos/{{ v.id }}">Открыть</a>
+            </div>
+          </form>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+{% endblock %}

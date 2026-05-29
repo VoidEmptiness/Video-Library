@@ -1,0 +1,52 @@
+{% extends "_layout.html" %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">Организация</p>
+      <h1>Теги</h1>
+    </div>
+    <div class="head-stats">
+      <span>{{ tags|length }} тегов</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <form method="post" action="/tags/create" class="create-row">
+      <label class="field grow">
+        <span>Новый тег</span>
+        <input name="name" placeholder="Например: family" required />
+      </label>
+      <button class="button" type="submit">Создать</button>
+    </form>
+  </section>
+
+  <section class="section-block simple-select-root" data-simple-select-root>
+    {% if tags|length == 0 %}
+      <div class="empty-state">
+        <strong>Тегов пока нет</strong>
+        <p>Создайте теги, чтобы быстрее фильтровать видео и собирать виртуальные папки.</p>
+      </div>
+    {% else %}
+      <form method="post" action="/tags/delete-selected" onsubmit="return confirm('Удалить выбранные теги?');">
+        <div class="selection-actions">
+          <button class="button secondary compact" type="button" data-simple-select-toggle>Выбрать</button>
+        </div>
+        <div class="bulk-bar" data-simple-select-bar hidden>
+          <span data-simple-select-count>0 выбрано</span>
+          <button class="button danger ghost compact" type="submit" data-simple-select-submit disabled>Удалить выбранные</button>
+        </div>
+        <div class="list selectable-list">
+          {% for t in tags %}
+            <label class="list-row">
+              <span class="list-check">
+                <input type="checkbox" name="tag_ids" value="{{ t.id }}" data-simple-select-item />
+              </span>
+              <span class="chip">#{{ t.name }}</span>
+              <span class="list-hint">ID {{ t.id }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </form>
+    {% endif %}
+  </section>
+{% endblock %}

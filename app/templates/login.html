@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Вход — {{ title }}</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <div class="brand auth-brand">
+        <span class="brand-mark">VL</span>
+        <span>
+          <strong>Video Library</strong>
+          <small>закрытый доступ</small>
+        </span>
+      </div>
+
+      <div class="panel-title">
+        <h1>Вход</h1>
+        <p>Введите логин и пароль администратора.</p>
+      </div>
+
+      {% if error %}
+        <div class="alert">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/login" class="form-stack">
+        <label class="field">
+          <span>Логин</span>
+          <input name="username" autocomplete="username" required />
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <button class="button" type="submit">Войти</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

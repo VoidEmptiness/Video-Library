@@ -1,0 +1,120 @@
+{% extends "_layout.html" %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">Виртуальная папка</p>
+      <h1>{{ folder.name }}</h1>
+    </div>
+    <a class="button secondary" href="/folders">К папкам</a>
+  </section>
+
+  <section class="panel compact-panel">
+    <div class="folder-summary">
+      <span class="mode-pill">{% if folder.match_all %}Все теги{% else %}Любой тег{% endif %}</span>
+      <div class="chips">
+        {% for t in folder.tags %}
+          <span class="chip">#{{ t.name }}</span>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="section-block">
+    <div class="section-title">
+      <h2>Вложенные папки</h2>
+      <span>{{ folder.children|length }}</span>
+    </div>
+    <details class="edit-box" style="margin-bottom: 16px;">
+      <summary class="button secondary compact" style="margin-bottom: 12px;">+ Создать вложенную папку</summary>
+      <form method="post" action="/folders/create" class="form-stack" style="margin-bottom: 16px;">
+        <input type="hidden" name="parent_id" value="{{ folder.id }}" />
+        <div class="form-grid">
+          <label class="field">
+            <span>Название</span>
+            <input name="name" placeholder="Например: Избранное" required />
+          </label>
+          <label class="switch-row">
+            <input type="checkbox" name="match_all" value="1" />
+            <span>Требовать все теги</span>
+          </label>
+        </div>
+        <div class="field">
+          <span>Теги папки</span>
+          <div class="tags">
+            {% for t in all_tags %}
+              <label class="pill">
+                <input type="checkbox" name="tag_ids" value="{{ t.id }}" />
+                <span>#{{ t.name }}</span>
+              </label>
+            {% endfor %}
+            {% if all_tags|length == 0 %}
+              <span class="empty-inline">Теги пока не созданы</span>
+            {% endif %}
+          </div>
+        </div>
+        <button class="button" type="submit">Создать</button>
+      </form>
+    </details>
+    {% if folder.children|length > 0 %}
+      <div class="folder-list">
+        {% for child in folder.children %}
+          <article class="folder-card">
+            <div class="folder-main">
+              <a class="folder-name" href="/folders/{{ child.id }}">{{ child.name }}</a>
+              <div class="folder-summary">
+                <span class="mode-pill">{% if child.match_all %}Все теги{% else %}Любой тег{% endif %}</span>
+                <div class="chips">
+                  {% for t in child.tags %}
+                    <span class="chip">#{{ t.name }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <strong>Вложенных папок нет</strong>
+        <p>Создайте вложенную папку, чтобы структурировать видео внутри этой подборки.</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="section-block">
+    <div class="section-title">
+      <h2>Видео</h2>
+      <span>{{ videos|length }}</span>
+    </div>
+
+    {% if videos|length == 0 %}
+      <div class="empty-state">
+        <strong>Ничего не найдено</strong>
+        <p>В папку попадут видео, у которых есть подходящие теги.</p>
+      </div>
+    {% else %}
+      <div class="video-grid">
+        {% for v in videos %}
+          <a class="video-card" href="/videos/{{ v.id }}">
+            <div class="thumb">
+              {% if v.thumbnail_path %}
+                <img loading="lazy" src="/thumb/{{ v.id }}" alt="" />
+              {% else %}
+                <div class="thumb-placeholder">VIDEO</div>
+              {% endif %}
+            </div>
+            <div class="video-meta">
+              <strong title="{{ v.original_name }}">{{ v.original_name|short_name }}</strong>
+              <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
+            </div>
+            <div class="chips">
+              {% for t in v.tags %}
+                <span class="chip">#{{ t.name }}</span>
+              {% endfor %}
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

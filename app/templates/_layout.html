@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }}</title>
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem("theme");
+        if (stored === "dark" || stored === "light") {
+          document.documentElement.setAttribute("data-theme", stored);
+        } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  {% set path = request.url.path %}
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="На главную">
+      <span class="brand-mark">VL</span>
+      <span>
+        <strong>Video Library</strong>
+        <small>локальная медиатека</small>
+      </span>
+    </a>
+
+    <nav class="nav" aria-label="Основная навигация">
+      <a class="{% if path == '/' or path.startswith('/videos') or path.startswith('/upload') %}active{% endif %}" href="/">Видео</a>
+      <a class="{% if path.startswith('/tags') %}active{% endif %}" href="/tags">Теги</a>
+      <a class="{% if path.startswith('/folders') %}active{% endif %}" href="/folders">Папки</a>
+    </nav>
+
+    <div class="topbar-actions">
+      <div class="theme-switch" role="group" aria-label="Выбор темы">
+        <button class="theme-icon-button" type="button" data-theme-set="light" aria-label="Светлая тема" title="Светлая тема" aria-pressed="false">
+          <span aria-hidden="true">☀</span>
+        </button>
+        <button class="theme-icon-button" type="button" data-theme-set="dark" aria-label="Тёмная тема" title="Тёмная тема" aria-pressed="false">
+          <span aria-hidden="true">🌙</span>
+        </button>
+      </div>
+      <form class="logout-form" method="post" action="/logout">
+        <button class="button ghost compact" type="submit">Выйти</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="shell">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

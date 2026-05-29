@@ -1,0 +1,75 @@
+{% extends "_layout.html" %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">Подборки по тегам</p>
+      <h1>Виртуальные папки</h1>
+    </div>
+    <div class="head-stats">
+      <span>{{ folders|length }} папок</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-title">
+      <h2>Новая папка</h2>
+      <p>Папка сама собирает видео по выбранным тегам.</p>
+    </div>
+
+    <form method="post" action="/folders/create" class="form-stack">
+      <div class="form-grid">
+        <label class="field">
+          <span>Название</span>
+          <input name="name" placeholder="Например: Work clips" required />
+        </label>
+        <label class="switch-row">
+          <input type="checkbox" name="match_all" value="1" />
+          <span>Показывать только видео, где есть все выбранные теги</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <span>Теги папки</span>
+        <div class="tags">
+          {% for t in all_tags %}
+            <label class="pill">
+              <input type="checkbox" name="tag_ids" value="{{ t.id }}" />
+              <span>#{{ t.name }}</span>
+            </label>
+          {% endfor %}
+          {% if all_tags|length == 0 %}
+            <span class="empty-inline">Теги пока не созданы</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <button class="button" type="submit">Создать папку</button>
+    </form>
+  </section>
+
+  <section class="section-block simple-select-root" data-simple-select-root>
+    {% if folders|length == 0 %}
+      <div class="empty-state">
+        <strong>Папок пока нет</strong>
+        <p>Создайте папку из тегов, чтобы получать готовые подборки без ручной сортировки файлов.</p>
+      </div>
+    {% else %}
+      <form id="bulkFolderDeleteForm" method="post" action="/folders/delete-selected" onsubmit="return confirm('Удалить выбранные папки?');">
+        <div class="selection-actions">
+          <button class="button secondary compact" type="button" data-simple-select-toggle>Выбрать</button>
+        </div>
+        <div class="bulk-bar" data-simple-select-bar hidden>
+          <span data-simple-select-count>0 выбрано</span>
+          <button class="button danger ghost compact" type="submit" data-simple-select-submit disabled>Удалить выбранные</button>
+        </div>
+      </form>
+      <div class="folder-list">
+          {% for f in folders %}
+            {% if not f.parent_id %}
+              {% include "_folder_item.html" %}
+            {% endif %}
+          {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

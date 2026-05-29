@@ -1,0 +1,146 @@
+{% extends "_layout.html" %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">Медиатека</p>
+      <h1>Видео</h1>
+    </div>
+    <div class="head-stats">
+      <span>{{ videos | length }} файлов</span>
+      <span>{{ all_tags | length }} тегов</span>
+    </div>
+  </section>
+
+  <section class="workspace-grid">
+    <article class="panel upload-panel">
+      <div class="panel-title">
+        <h2>Загрузка</h2>
+        <p>Перетащите видео в область или выберите файлы вручную.</p>
+      </div>
+
+      <div id="dropzone" class="dropzone">
+        <form id="uploadForm" method="post" action="/videos/upload" enctype="multipart/form-data">
+          <input id="fileInput" class="file-input" type="file" name="files" accept="video/*" multiple required />
+          <div class="dropzone-inner">
+            <div class="drop-icon" aria-hidden="true">+</div>
+            <div>
+              <strong>Добавить видео</strong>
+              <span id="fileLabel">Файлы не выбраны</span>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button id="chooseBtn" class="button secondary" type="button">Выбрать</button>
+            <button class="button" type="submit">Загрузить</button>
+          </div>
+        </form>
+        <div class="upload-progress" data-upload-progress hidden>
+          <div class="upload-progress-bar" data-upload-progress-bar></div>
+        </div>
+        <p id="uploadStatus" class="status"></p>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-title">
+        <h2>Фильтр</h2>
+        <p>Поиск по имени файла и выбранным тегам.</p>
+      </div>
+
+      <form method="get" action="/" class="form-stack">
+        <label class="field">
+          <span>Имя файла</span>
+          <input name="q" value="{{ q }}" placeholder="Например: vacation" />
+        </label>
+
+        <div class="field">
+          <span>Теги</span>
+          <label class="filter-option">
+            <input type="checkbox" name="untagged" value="1" data-untagged-filter {% if untagged_filter %}checked{% endif %} />
+            <span>Показать только видео без тегов</span>
+          </label>
+          <div class="tags">
+            {% for t in all_tags %}
+              <label class="pill">
+                <input type="checkbox" name="tag" value="{{ t.id }}" {% if t.id in selected_tag_ids %}checked{% endif %}/>
+                <span>#{{ t.name }}</span>
+              </label>
+            {% endfor %}
+            {% if all_tags|length == 0 %}
+              <span class="empty-inline">Теги пока не созданы</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <button class="button" type="submit">Применить фильтр</button>
+      </form>
+    </article>
+  </section>
+
+  <section class="section-block">
+    <div class="section-title">
+      <h2>{% if untagged_filter %}Видео без тегов{% else %}Все видео{% endif %}</h2>
+      <div class="selection-actions">
+        <span>{{ videos | length }}</span>
+        {% if videos|length > 0 %}
+          <button class="button secondary compact" type="button" data-select-toggle>Выбрать</button>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if videos|length == 0 %}
+      <div class="empty-state">
+        {% if untagged_filter %}
+          <strong>Все видео уже размечены</strong>
+          <p>Видео без тегов не найдено. Можно снять фильтр и посмотреть всю медиатеку.</p>
+        {% else %}
+          <strong>Пока пусто</strong>
+          <p>Загрузите первое видео, и оно появится здесь с миниатюрой, тегами и быстрым переходом к плееру.</p>
+        {% endif %}
+      </div>
+    {% else %}
+      <form method="post" action="/videos/delete-selected" data-bulk-delete-form>
+        <input type="hidden" name="return_to" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}" />
+        <div class="bulk-bar" data-bulk-bar hidden>
+          <span data-selected-count>0 выбрано</span>
+          <div class="toolbar">
+            <button class="button secondary compact" type="button" data-select-all>Выбрать все</button>
+            <button class="button secondary compact" type="button" data-select-clear>Снять выбор</button>
+            <button class="button danger compact" type="submit" disabled data-delete-selected>Удалить выбранные</button>
+          </div>
+        </div>
+
+        <div class="video-grid">
+          {% for v in videos %}
+            <article class="video-card" data-select-card>
+              <label class="select-check">
+                <input type="checkbox" name="video_ids" value="{{ v.id }}" data-video-select />
+                <span>Выбрать</span>
+              </label>
+              <a class="video-link" href="/videos/{{ v.id }}">
+                <div class="thumb">
+                  {% if v.thumbnail_path %}
+                    <img loading="lazy" src="/thumb/{{ v.id }}" alt="" />
+                  {% else %}
+                    <div class="thumb-placeholder">VIDEO</div>
+                  {% endif %}
+                </div>
+                <div class="video-meta">
+                  <strong title="{{ v.original_name }}">
+                    {{ v.original_name|short_name }}
+                    <span class="transcode-icon-inline" data-transcode-indicator="{{ v.id }}" hidden>⚙</span>
+                  </strong>
+                  <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
+                </div>
+              </a>
+              <div class="chips">
+                {% for t in v.tags %}
+                  <span class="chip">#{{ t.name }}</span>
+                {% endfor %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </form>
+    {% endif %}
+  </section>
+{% endblock %}
