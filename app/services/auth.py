@@ -11,7 +11,6 @@ SESSION_COOKIE = "vp_session"
 
 
 def _secret() -> str:
-    # Must be set in production (docker-compose already does).
     return os.getenv("SECRET_KEY", "dev-secret-change-me")
 
 

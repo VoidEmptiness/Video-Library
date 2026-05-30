@@ -947,6 +947,29 @@ html[data-theme="dark"] .video-card:hover {
   align-items: flex-start;
 }
 
+.quality-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quality-selector select {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  outline: none;
+}
+
+.quality-selector select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 .upload-thumb {
   width: 220px;
   flex: 0 0 220px;

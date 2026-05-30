@@ -5,8 +5,6 @@ from sqlalchemy.orm import sessionmaker
 
 
 def _db_url() -> str:
-    # Default to SQLite stored on the persistent /data volume.
-    # Can be overridden with DATABASE_URL for PostgreSQL, etc.
     return os.getenv("DATABASE_URL", "sqlite:////data/app.db")
 
 

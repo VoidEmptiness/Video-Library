@@ -331,7 +331,6 @@ function wireThemeToggle() {
       const isActive = button.dataset.themeSet === theme;
       button.classList.toggle("active", isActive);
       button.setAttribute("aria-pressed", isActive ? "true" : "false");
-      // In light theme show moon button, in dark theme show sun button.
       const shouldShow = theme === "dark" ? button.dataset.themeSet === "light" : button.dataset.themeSet === "dark";
       button.hidden = !shouldShow;
     }
@@ -365,10 +364,8 @@ function wireVideoMeta() {
   const resolutionNode = document.querySelector("[data-video-resolution]");
   if (!video || !durationNode) return;
 
-  // Start with 16:9 so the player is big immediately
   video.style.aspectRatio = "16 / 9";
 
-  // Show error message if codec isn't supported (e.g. HEVC)
   video.addEventListener("error", () => {
     let msg = "Не удалось воспроизвести видео";
     if (video.error) {
@@ -397,7 +394,6 @@ function wireVideoMeta() {
     return false;
   };
 
-  // Poll until we get real dimensions (they may not be ready on loadedmetadata for some codecs)
   const pollDimensions = () => {
     if (resolveVideoDimensions()) return;
     let attempts = 0;
@@ -416,13 +412,11 @@ function wireVideoMeta() {
   video.addEventListener("loadeddata", pollDimensions);
   video.addEventListener("durationchange", updateDuration);
   video.addEventListener("resize", pollDimensions);
-  // Dimensions are guaranteed to be known when video starts playing
   video.addEventListener("playing", pollDimensions);
   if (video.readyState >= 1) onLoadStart();
   if (video.readyState >= 2) pollDimensions();
   if (document.readyState === "complete") pollDimensions();
   window.addEventListener("load", pollDimensions);
-  // Also check whenever the seekable range changes (some browsers populate sizes then)
   video.addEventListener("progress", pollDimensions);
 }
 
@@ -451,7 +445,6 @@ function wireVideoPlayerShortcuts() {
           if (delta > 0 && delta < 0.25) {
             const candidate = 1 / delta;
             if (candidate > 10 && candidate < 120) {
-              // Smooth a bit; we only need a reasonable step.
               fpsEstimate = Math.round((fpsEstimate * 3 + candidate) / 4);
               sampleCount += 1;
             }
@@ -475,14 +468,12 @@ function wireVideoPlayerShortcuts() {
   }
 
   async function stepFrame(direction) {
-    // Works best when paused (like YouTube). If playing, we pause and step.
     const wasPaused = video.paused;
     if (!wasPaused) video.pause();
 
     const step = 1 / (fpsEstimate || 30);
     seekBy(step * direction);
 
-    // Ensure we land on a decoded frame for smoother "frame step".
     await new Promise((resolve) => {
       let done = false;
       const finish = () => {
@@ -502,7 +493,6 @@ function wireVideoPlayerShortcuts() {
     if (isTypingTarget(event.target)) return;
     if (event.altKey || event.metaKey || event.ctrlKey) return;
 
-    // YouTube-like seeking
     if (event.key === "ArrowLeft") {
       seekBy(event.shiftKey ? -10 : -5);
       event.preventDefault();
@@ -514,7 +504,6 @@ function wireVideoPlayerShortcuts() {
       return;
     }
 
-    // Frame-by-frame (YouTube uses , and . when paused)
     if (event.key === "," || event.key === "<") {
       stepFrame(-1);
       event.preventDefault();
@@ -628,6 +617,33 @@ function wireBulkTranscodeIndicators() {
   pollInterval = setInterval(checkAllProgress, 1000);
 }
 
+function wireQualitySwitch() {
+  const selector = document.querySelector("[data-quality-switch]");
+  if (!selector) return;
+  const video = document.querySelector("video.player");
+  if (!video) return;
+
+  let currentTime = 0;
+  let wasPlaying = false;
+
+  selector.addEventListener("change", () => {
+    const quality = selector.value;
+    const sources = Array.from(video.querySelectorAll("source[data-quality]"));
+
+    currentTime = video.currentTime;
+    wasPlaying = !video.paused;
+
+    const target = sources.find((s) => s.dataset.quality === quality);
+    if (!target) return;
+
+    video.src = target.src;
+    video.currentTime = currentTime;
+    if (wasPlaying) {
+      video.play().catch(() => {});
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireSearchForm();
   wireUntaggedFilter();
@@ -640,4 +656,5 @@ document.addEventListener("DOMContentLoaded", () => {
   wireVideoMeta();
   wireFolderToggles();
   wireBulkTranscodeIndicators();
+  wireQualitySwitch();
 });

@@ -12,7 +12,10 @@
 
   <section class="player-shell">
     <video class="player" controls preload="auto">
-      <source src="/media/{{ video.id }}" type="{{ video.content_type }}" />
+      <source src="/media/{{ video.id }}" type="{{ video.content_type }}" data-quality="original" />
+      {% if has_720p %}
+      <source src="/media/720p/{{ video.id }}" type="video/mp4" data-quality="720p" />
+      {% endif %}
     </video>
     <div class="file-details">
       <span>ID {{ video.id }}</span>
@@ -21,6 +24,15 @@
       <span>Кодек: {{ codec_name or "не определён" }}</span>
       <span data-video-duration>Длительность: {{ duration_label }}</span>
       <span data-video-resolution>{% if resolution_label %}Разрешение: {{ resolution_label }}{% else %}Разрешение: ...{% endif %}</span>
+      {% if has_720p %}
+      <span class="quality-selector">
+        Качество:
+        <select data-quality-switch data-video-id="{{ video.id }}">
+          <option value="original" selected>Оригинал</option>
+          <option value="720p">720p</option>
+        </select>
+      </span>
+      {% endif %}
     </div>
   </section>
 

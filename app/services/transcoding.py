@@ -7,12 +7,10 @@ import subprocess
 from pathlib import Path
 
 
-# Path to bundled FFmpeg binaries (relative to project root)
-_THIS_DIR = Path(__file__).resolve().parent  # app/services/
-_PROJECT_ROOT = _THIS_DIR.parent.parent  # videoplayer/
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _THIS_DIR.parent.parent
 FFMPEG_DIR = _PROJECT_ROOT / "ffmpeg" / "bin"
 
-# On Windows look for .exe, on Linux look for plain binary
 _FFMPEG_SUFFIX = ".exe" if os.name == "nt" else ""
 _BUNDLED_FFMPEG = FFMPEG_DIR / f"ffmpeg{_FFMPEG_SUFFIX}"
 _BUNDLED_FFPROBE = FFMPEG_DIR / f"ffprobe{_FFMPEG_SUFFIX}"
@@ -49,7 +47,10 @@ TRANSCODE_TIMEOUT_SECONDS = int(_raw_timeout) if _raw_timeout.isdigit() else 360
 if TRANSCODE_TIMEOUT_SECONDS <= 0:
     TRANSCODE_TIMEOUT_SECONDS = 3600
 
-# Progress file directory
+TRANSCODE_DOWNSCALE_HEIGHT = int(os.getenv("TRANSCODE_DOWNSCALE_HEIGHT", "720"))
+TRANSCODE_DOWNSCALE_MAX_HEIGHT = int(os.getenv("TRANSCODE_DOWNSCALE_MAX_HEIGHT", "1080"))
+TRANSCODE_DOWNSCALE_FPS = int(os.getenv("TRANSCODE_DOWNSCALE_FPS", "24"))
+
 PROGRESS_DIR = Path(os.getenv("TRANSCODE_PROGRESS_DIR", "transcode_progress"))
 
 
@@ -93,15 +94,72 @@ def video_codec(input_path: Path) -> str | None:
         return None
 
 
+def video_fps(input_path: Path) -> float | None:
+    if not ffprobe_available():
+        return None
+    cmd = [
+        str(FFPROBE_EXE),
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(input_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=False)
+        if result.returncode != 0:
+            return None
+        raw = result.stdout.strip()
+        if not raw or "/" not in raw:
+            return None
+        parts = raw.split("/")
+        if len(parts) == 2:
+            num = float(parts[0])
+            den = float(parts[1])
+            if den > 0:
+                return round(num / den, 3)
+        return None
+    except Exception:
+        return None
+
+
+def video_height(input_path: Path) -> int | None:
+    if not ffprobe_available():
+        return None
+    cmd = [
+        str(FFPROBE_EXE),
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=height",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(input_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=False)
+        if result.returncode != 0:
+            return None
+        raw = result.stdout.strip()
+        return int(raw) if raw else None
+    except Exception:
+        return None
+
+
 def video_needs_transcode(input_path: Path) -> bool:
-    """Returns True if the video should be transcoded to H.264 for browser compatibility."""
     if not TRANSCODE_ENABLED:
         return False
     codec = video_codec(input_path)
     if codec is None:
-        return False  # can't detect, keep as-is
-    # H.264 is natively supported in all browsers, everything else needs transcoding
+        return False
     return codec != "h264"
+
+
+def video_needs_downscale(input_path: Path) -> bool:
+    if not TRANSCODE_ENABLED:
+        return False
+    h = video_height(input_path)
+    if h is None:
+        return False
+    return h > TRANSCODE_DOWNSCALE_MAX_HEIGHT
 
 
 def get_progress_file(video_id: int) -> Path:
@@ -110,7 +168,6 @@ def get_progress_file(video_id: int) -> Path:
 
 
 def write_progress(video_id: int, status: str, percent: float = 0):
-    """Write progress status to a file."""
     try:
         get_progress_file(video_id).write_text(f"{percent}\n{status}")
     except Exception:
@@ -118,7 +175,6 @@ def write_progress(video_id: int, status: str, percent: float = 0):
 
 
 def clear_progress(video_id: int):
-    """Remove progress file when done."""
     try:
         get_progress_file(video_id).unlink()
     except Exception:
@@ -126,7 +182,6 @@ def clear_progress(video_id: int):
 
 
 def read_progress(video_id: int) -> dict:
-    """Read current progress, returns dict with status/percent."""
     pf = get_progress_file(video_id)
     if not pf.exists():
         return {"status": "done", "percent": 100}
@@ -139,14 +194,19 @@ def read_progress(video_id: int) -> dict:
         return {"status": "unknown", "percent": 0}
 
 
-def transcode_to_h264(input_path: Path, output_path: Path, video_id: int | None = None) -> bool:
+def transcode_to_h264(
+    input_path: Path,
+    output_path: Path,
+    video_id: int | None = None,
+    downscale_height: int | None = None,
+    target_fps: int | None = None,
+) -> bool:
     if not ffmpeg_available():
         return False
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     duration = None
-    original_bitrate = None
     if video_id and ffprobe_available():
         try:
             r = subprocess.run(
@@ -158,55 +218,38 @@ def transcode_to_h264(input_path: Path, output_path: Path, video_id: int | None 
                 lines = r.stdout.strip().split('\n')
                 if len(lines) >= 2:
                     duration = float(lines[0].strip()) if lines[0].strip() else None
-                    original_bitrate = int(lines[1].strip()) if lines[1].strip() else None
         except Exception:
             pass
 
     if video_id:
         write_progress(video_id, "Подготовка...", 0)
 
-    # Calculate target video bitrate (subtract audio bitrate)
-    target_video_bitrate = None
-    if original_bitrate and duration:
-        # Target bitrate slightly higher than original to compensate for H.264 inefficiency
-        # but cap at reasonable limit to prevent massive file growth
-        target_video_bitrate = max(500, min(original_bitrate - 128000, original_bitrate * 1.2))
+    vf_parts = []
+    if downscale_height:
+        vf_parts.append(f"scale=-2:{downscale_height}")
+    if target_fps:
+        vf_parts.append(f"fps={target_fps}")
 
-    # Build command
     cmd = [
         str(FFMPEG_EXE),
         "-y",
         "-i",
         str(input_path),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a?",
-        "-c:v",
-        "libx264",
-        "-preset",
-        TRANSCODE_PRESET,
-        "-profile:v",
-        "main",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-movflags",
-        "+faststart",
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "30",
+        "-tune", "fastdecode",
+        "-profile:v", "main",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "96k",
+        "-movflags", "+faststart",
         "-sn",
     ]
-
-    # Use bitrate-based encoding if we have a target, otherwise use CRF
-    if target_video_bitrate:
-        cmd.extend(["-b:v", str(target_video_bitrate)])
-        cmd.extend(["-maxrate", str(int(target_video_bitrate * 1.5))])
-        cmd.extend(["-bufsize", str(int(target_video_bitrate * 2))])
-    else:
-        cmd.extend(["-crf", TRANSCODE_CRF])
-
+    if vf_parts:
+        cmd.extend(["-vf", ",".join(vf_parts)])
     cmd.append(str(output_path))
 
     try:
@@ -217,7 +260,6 @@ def transcode_to_h264(input_path: Path, output_path: Path, video_id: int | None 
             text=True,
         )
         
-        # Parse ffmpeg progress output
         if video_id and proc.stderr:
             time_pattern = re.compile(r'out_time_ms=(\d+)')
             last_percent = 0

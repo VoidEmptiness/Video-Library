@@ -18,7 +18,19 @@ from .models import Base, Folder, Tag, Video
 from .services.auth import SESSION_COOKIE, create_session_token, parse_session_token, session_expiry_dt, verify_credentials
 from .services.storage import THUMB_DIR, VIDEO_DIR, ensure_dirs, unique_storage_name, video_path
 from .services.thumbnails import generate_thumbnail
-from .services.transcoding import FFPROBE_EXE, ffprobe_available, video_needs_transcode, transcode_to_h264, read_progress
+from .services.transcoding import (
+    FFPROBE_EXE,
+    TRANSCODE_DOWNSCALE_FPS,
+    TRANSCODE_DOWNSCALE_HEIGHT,
+    TRANSCODE_DOWNSCALE_MAX_HEIGHT,
+    ffprobe_available,
+    read_progress,
+    transcode_to_h264,
+    video_fps,
+    video_height,
+    video_needs_downscale,
+    video_needs_transcode,
+)
 
 
 APP_TITLE = os.getenv("APP_TITLE", "Video Library")
@@ -120,6 +132,19 @@ def _delete_video_files(path: Path, thumb: Path | None) -> None:
         pass
 
 
+def _delete_video_files_with_720p(video: Video) -> None:
+    path = video_path(video.filename)
+    thumb = Path(video.thumbnail_path) if video.thumbnail_path else None
+    _delete_video_files(path, thumb)
+    if video.filename_720p:
+        try:
+            p = video_path(video.filename_720p)
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+
 def _probe_video_metadata(path: Path) -> tuple[str | None, float | None, int | None, int | None]:
     if not ffprobe_available():
         return None, None, None, None
@@ -191,7 +216,6 @@ def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | 
     start_raw, end_raw = value.split("-", 1)
     try:
         if start_raw == "":
-            # Suffix range: "bytes=-500" -> last 500 bytes.
             length = int(end_raw)
             if length <= 0:
                 return None
@@ -314,34 +338,36 @@ def index(
 
 
 def _do_transcode(video_id: int, original_path: Path) -> None:
-    """Background task: transcode to H.264 and replace the file."""
     from .database import SessionLocal as _SessionLocal
     from .models import Video as _Video
 
-    if not video_needs_transcode(original_path):
+    if not video_needs_downscale(original_path):
         return
 
-    display_name = original_path.stem + ".mp4"
+    display_name = original_path.stem + "_720p.mp4"
     out_name = unique_storage_name(display_name, ext_override=".mp4")
     out_dest = video_path(out_name)
 
-    if not transcode_to_h264(original_path, out_dest, video_id):
-        return  # keep original
+    target_fps = None
+    original_fps = video_fps(original_path)
+    if original_fps is not None:
+        if original_fps >= TRANSCODE_DOWNSCALE_FPS:
+            target_fps = TRANSCODE_DOWNSCALE_FPS
 
-    # Replace original with transcoded version
-    try:
-        original_path.unlink()
-    except Exception:
-        pass
+    if not transcode_to_h264(
+        original_path,
+        out_dest,
+        video_id,
+        downscale_height=TRANSCODE_DOWNSCALE_HEIGHT,
+        target_fps=target_fps,
+    ):
+        return
 
     db = _SessionLocal()
     try:
         video = db.get(_Video, video_id)
         if video:
-            video.filename = out_name
-            video.content_type = "video/mp4"
-            video.size_bytes = out_dest.stat().st_size
-            video.original_name = display_name
+            video.filename_720p = out_name
             db.add(video)
             db.commit()
     except Exception:
@@ -387,12 +413,10 @@ async def upload_video(
         db.add(video)
         db.flush()
 
-        # best-effort thumbnail
         thumb = THUMB_DIR / f"{video.id}.jpg"
         if generate_thumbnail(dest, thumb):
             video.thumbnail_path = str(thumb)
 
-        # Queue async transcoding
         background_tasks.add_task(_do_transcode, video.id, dest)
 
         created_ids.append(video.id)
@@ -416,8 +440,8 @@ def video_page(
     media_path = video_path(video.filename)
     codec_name, duration_seconds, video_width, video_height = _probe_video_metadata(media_path) if media_path.exists() else (None, None, None, None)
     resolution_label = f"{video_width}×{video_height}" if video_width and video_height else None
-    # Normalize codec name: "hevc" → "H.265" for display
     codec_display = {"hevc": "H.265", "h264": "H.264", "h265": "H.265"}.get(codec_name, codec_name) if codec_name else None
+    has_720p = bool(video.filename_720p) and video_path(video.filename_720p).exists()
     return templates.TemplateResponse(
         "video.html",
         {
@@ -430,8 +454,57 @@ def video_page(
             "resolution_label": resolution_label,
             "video_width": video_width,
             "video_height": video_height,
+            "has_720p": has_720p,
         },
     )
+
+
+@app.get("/media/720p/{video_id}")
+def media_stream_720p(
+    video_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if not video.filename_720p:
+        raise HTTPException(status_code=404, detail="720p version not available")
+    path = video_path(video.filename_720p)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    file_size = path.stat().st_size
+    range_header = request.headers.get("range")
+    media_type = "video/mp4"
+
+    if not range_header:
+        return FileResponse(path=str(path), media_type=media_type)
+
+    parsed = _parse_range_header(range_header, file_size)
+    if not parsed:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+
+    start, end = parsed
+    chunk_size = (end - start) + 1
+
+    def iter_file():
+        with path.open("rb") as fh:
+            fh.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                data = fh.read(min(1024 * 1024, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Content-Length": str(chunk_size),
+    }
+    return StreamingResponse(iter_file(), status_code=206, media_type=media_type, headers=headers)
 
 
 @app.get("/media/{video_id}")
@@ -504,11 +577,9 @@ def delete_video(
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    path = video_path(video.filename)
-    thumb = Path(video.thumbnail_path) if video.thumbnail_path else None
+    _delete_video_files_with_720p(video)
     db.delete(video)
     db.commit()
-    _delete_video_files(path, thumb)
     return _redirect("/")
 
 
@@ -523,20 +594,11 @@ def delete_selected_videos(
         return _redirect(_safe_return_to(return_to))
 
     videos = list(db.scalars(select(Video).where(Video.id.in_(video_ids))))
-    files = [
-        (
-            video_path(video.filename),
-            Path(video.thumbnail_path) if video.thumbnail_path else None,
-        )
-        for video in videos
-    ]
 
     for video in videos:
+        _delete_video_files_with_720p(video)
         db.delete(video)
     db.commit()
-
-    for path, thumb in files:
-        _delete_video_files(path, thumb)
 
     return _redirect(_safe_return_to(return_to))
 
@@ -708,7 +770,6 @@ def folder_create(
         parent_id = None
     from sqlalchemy.exc import IntegrityError
     
-    # If name exists, append a number suffix
     base_name = name
     attempt = 1
     while True:
@@ -773,7 +834,6 @@ def folder_edit(
         raise HTTPException(status_code=404, detail="Folder not found")
     folder.name = name.strip() or folder.name
     folder.match_all = bool(match_all)
-    # Prevent circular reference
     if parent_id and parent_id != folder.id and db.get(Folder, parent_id):
         folder.parent_id = parent_id
     else:
@@ -793,7 +853,6 @@ def _folder_videos(db: Session, folder: Folder):
         return []
 
     if folder.match_all:
-        # Videos that have *all* tags: group by and count matches.
         stmt = (
             select(Video)
             .join(Video.tags)
@@ -845,11 +904,6 @@ def folder_view(
             "all_tags": _all_tags(db),
         },
     )
-
-
-# -----------------------
-# Minimal JSON API (CRUD)
-# -----------------------
 
 
 @app.get("/api/videos")
@@ -948,7 +1002,6 @@ def api_transcode_progress(video_id: int):
 
 @app.get("/api/videos/transcode-status")
 def api_transcode_status_bulk(db: Annotated[Session, Depends(get_db)]):
-    """Get transcoding status for all videos."""
     videos = list(db.scalars(select(Video).order_by(Video.created_at.desc())))
     result = {}
     for video in videos:

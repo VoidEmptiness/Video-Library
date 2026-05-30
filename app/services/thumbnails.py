@@ -10,9 +10,6 @@ THUMBNAIL_TIMEOUT_SECONDS = int(os.getenv("THUMBNAIL_TIMEOUT_SECONDS", "30") or 
 
 
 def generate_thumbnail(input_path: Path, output_path: Path) -> bool:
-    """
-    Best-effort thumbnail generation. Returns True on success.
-    """
     if not ffmpeg_available():
         return False
     output_path.parent.mkdir(parents=True, exist_ok=True)

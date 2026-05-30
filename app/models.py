@@ -33,6 +33,7 @@ class Video(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     filename: Mapped[str] = mapped_column(String(255))
+    filename_720p: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_name: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
@@ -71,7 +72,7 @@ class Folder(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
-    match_all: Mapped[bool] = mapped_column(Boolean, default=False)  # False=ANY, True=ALL
+    match_all: Mapped[bool] = mapped_column(Boolean, default=False)
     parent_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
