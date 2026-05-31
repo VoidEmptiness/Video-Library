@@ -445,6 +445,7 @@ def video_page(
     resolution_label = f"{video_width}×{video_height}" if video_width and video_height else None
     codec_display = {"hevc": "H.265", "h264": "H.264", "h265": "H.265"}.get(codec_name, codec_name) if codec_name else None
     has_720p = bool(video.filename_720p) and video_path(video.filename_720p).exists()
+    default_volume = get_setting("default_volume", 1.0)
     return templates.TemplateResponse(
         "video.html",
         {
@@ -458,6 +459,7 @@ def video_page(
             "video_width": video_width,
             "video_height": video_height,
             "has_720p": has_720p,
+            "default_volume": default_volume,
         },
     )
 
@@ -1026,6 +1028,7 @@ def settings_page(
             "request": request,
             "title": f"{APP_TITLE} — Настройки",
             "transcode_to_720p": settings.get("transcode_to_720p", True),
+            "default_volume": settings.get("default_volume", 1.0),
         },
     )
 
@@ -1034,7 +1037,11 @@ def settings_page(
 def settings_save(
     _: UserHTML,
     transcode_to_720p: Annotated[str | None, Form()] = None,
+    default_volume: Annotated[float | None, Form()] = None,
 ):
-    save_settings({"transcode_to_720p": transcode_to_720p == "1"})
+    settings = {"transcode_to_720p": transcode_to_720p == "1"}
+    if default_volume is not None:
+        settings["default_volume"] = max(0.0, min(1.0, default_volume))
+    save_settings(settings)
     return RedirectResponse(url="/settings", status_code=303)
 

@@ -644,6 +644,32 @@ function wireQualitySwitch() {
   });
 }
 
+function wireVolumeSlider() {
+  const slider = document.querySelector("[data-volume-slider]");
+  const label = document.querySelector("[data-volume-label]");
+  if (!slider || !label) return;
+
+  function updateLabel() {
+    const pct = Math.round(parseFloat(slider.value) * 100);
+    label.textContent = `${pct}%`;
+  }
+
+  slider.addEventListener("input", updateLabel);
+}
+
+function applyDefaultVolume() {
+  const video = document.querySelector("video.player");
+  if (!video) return;
+
+  const volumeEl = document.querySelector("[data-default-volume]");
+  if (!volumeEl) return;
+
+  const vol = parseFloat(volumeEl.value);
+  if (!isNaN(vol)) {
+    video.volume = Math.max(0, Math.min(1, vol));
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireSearchForm();
   wireUntaggedFilter();
@@ -657,4 +683,6 @@ document.addEventListener("DOMContentLoaded", () => {
   wireFolderToggles();
   wireBulkTranscodeIndicators();
   wireQualitySwitch();
+  wireVolumeSlider();
+  applyDefaultVolume();
 });

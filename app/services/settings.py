@@ -9,6 +9,7 @@ _SETTINGS_FILE = _SETTINGS_DIR / "settings.json"
 
 _DEFAULT_SETTINGS = {
     "transcode_to_720p": True,
+    "default_volume": 1.0,
 }
 
 

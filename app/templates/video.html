@@ -11,6 +11,7 @@
   </section>
 
   <section class="player-shell">
+    <input type="hidden" data-default-volume value="{{ default_volume }}" />
     <video class="player" controls preload="auto">
       <source src="/media/{{ video.id }}" type="{{ video.content_type }}" data-quality="original" />
       {% if has_720p %}

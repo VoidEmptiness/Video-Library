@@ -7,13 +7,34 @@
     </div>
   </section>
 
-  <section class="section-block">
-    <div class="panel-title">
-      <h2>Транскодирование видео</h2>
-      <p>Настройки автоматического перекодирования при загрузке видео.</p>
-    </div>
+  <form method="post" action="/settings" class="form-stack">
+    <section class="section-block">
+      <div class="panel-title">
+        <h2>Плеер</h2>
+        <p>Настройки видеоплеера по умолчанию.</p>
+      </div>
 
-    <form method="post" action="/settings" class="form-stack">
+      <label class="switch-row" style="flex-wrap: wrap">
+        <span>Громкость по умолчанию</span>
+        <span style="margin-left: auto; display: flex; align-items: center; gap: 0.5rem">
+          <input type="range" name="default_volume" min="0" max="1" step="0.01" value="{{ default_volume }}"
+                 data-volume-slider style="width: 260px" />
+          <output data-volume-label style="min-width: 3.5rem; text-align: center; font-variant-numeric: tabular-nums">
+            {{ "%.0f"|format(default_volume * 100) }}%
+          </output>
+        </span>
+      </label>
+      <p class="status" style="margin-top: 0">
+        Громкость при первом воспроизведении видео. Можно изменить в любом видео через ползунок плеера.
+      </p>
+    </section>
+
+    <section class="section-block">
+      <div class="panel-title">
+        <h2>Транскодирование видео</h2>
+        <p>Настройки автоматического перекодирования при загрузке видео.</p>
+      </div>
+
       <label class="switch-row">
         <input type="hidden" name="transcode_to_720p" value="0" />
         <input type="checkbox" name="transcode_to_720p" value="1" {% if transcode_to_720p %}checked{% endif %} />
@@ -31,10 +52,10 @@
           720p-копия не будет создаваться. Видео будет доступно только в оригинальном качестве.
         {% endif %}
       </p>
+    </section>
 
-      <div class="toolbar">
-        <button class="button" type="submit">Сохранить</button>
-      </div>
-    </form>
-  </section>
+    <div class="toolbar">
+      <button class="button" type="submit">Сохранить</button>
+    </div>
+  </form>
 {% endblock %}
