@@ -53,6 +53,7 @@ class Tag(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(String(256), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     videos: Mapped[list[Video]] = relationship(

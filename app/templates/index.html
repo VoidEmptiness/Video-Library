@@ -60,7 +60,7 @@
           </label>
           <div class="tags">
             {% for t in all_tags %}
-              <label class="pill">
+              <label class="pill"{% if t.description %} title="{{ t.description }}"{% endif %}>
                 <input type="checkbox" name="tag" value="{{ t.id }}" {% if t.id in selected_tag_ids %}checked{% endif %}/>
                 <span>#{{ t.name }}</span>
               </label>
@@ -134,7 +134,7 @@
               </a>
               <div class="chips">
                 {% for t in v.tags %}
-                  <span class="chip">#{{ t.name }}</span>
+                  <span class="chip"{% if t.description %} title="{{ t.description }}"{% endif %}>#{{ t.name }}</span>
                 {% endfor %}
               </div>
             </article>

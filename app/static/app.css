@@ -1,3 +1,4 @@
+
 :root {
   --bg: #f4f2ee;
   --surface: #ffffff;
@@ -847,6 +848,16 @@ html[data-theme="dark"] .video-card:hover {
   margin-left: auto;
   color: var(--muted);
   font-size: 12px;
+}
+
+.tag-description {
+  margin-left: 0.5rem;
+  font-style: italic;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .folder-card {

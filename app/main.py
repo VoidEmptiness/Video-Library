@@ -74,6 +74,16 @@ def _migrate_db() -> None:
     except Exception:
         pass
 
+    try:
+        inspector = inspect(engine)
+        columns = [col["name"] for col in inspector.get_columns("tags")]
+        if "description" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE tags ADD COLUMN description VARCHAR(256)"))
+                conn.commit()
+    except Exception:
+        pass
+
 
 @app.on_event("startup")
 def _startup() -> None:
@@ -690,6 +700,7 @@ def tag_create(
     name: Annotated[str, Form()],
     db: Annotated[Session, Depends(get_db)],
     _: UserHTML,
+    description: Annotated[str | None, Form()] = None,
 ):
     name = name.strip()
     if not name:
@@ -697,7 +708,8 @@ def tag_create(
     exists = db.scalar(select(func.count()).select_from(Tag).where(Tag.name == name))
     if exists:
         return _redirect("/tags")
-    db.add(Tag(name=name))
+    description_clean = description.strip() if description else None
+    db.add(Tag(name=name, description=description_clean or None))
     db.commit()
     return _redirect("/tags")
 

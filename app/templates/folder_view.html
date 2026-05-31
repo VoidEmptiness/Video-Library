@@ -13,7 +13,7 @@
       <span class="mode-pill">{% if folder.match_all %}Все теги{% else %}Любой тег{% endif %}</span>
       <div class="chips">
         {% for t in folder.tags %}
-          <span class="chip">#{{ t.name }}</span>
+          <span class="chip"{% if t.description %} title="{{ t.description }}"{% endif %}>#{{ t.name }}</span>
         {% endfor %}
       </div>
     </div>
@@ -42,7 +42,7 @@
           <span>Теги папки</span>
           <div class="tags">
             {% for t in all_tags %}
-              <label class="pill">
+              <label class="pill"{% if t.description %} title="{{ t.description }}"{% endif %}>
                 <input type="checkbox" name="tag_ids" value="{{ t.id }}" />
                 <span>#{{ t.name }}</span>
               </label>
@@ -65,7 +65,7 @@
                 <span class="mode-pill">{% if child.match_all %}Все теги{% else %}Любой тег{% endif %}</span>
                 <div class="chips">
                   {% for t in child.tags %}
-                    <span class="chip">#{{ t.name }}</span>
+                    <span class="chip"{% if t.description %} title="{{ t.description }}"{% endif %}>#{{ t.name }}</span>
                   {% endfor %}
                 </div>
               </div>
@@ -109,7 +109,7 @@
             </div>
             <div class="chips">
               {% for t in v.tags %}
-                <span class="chip">#{{ t.name }}</span>
+                <span class="chip"{% if t.description %} title="{{ t.description }}"{% endif %}>#{{ t.name }}</span>
               {% endfor %}
             </div>
           </a>

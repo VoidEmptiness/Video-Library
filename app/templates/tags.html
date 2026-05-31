@@ -11,12 +11,16 @@
   </section>
 
   <section class="panel">
-    <form method="post" action="/tags/create" class="create-row">
+    <form method="post" action="/tags/create" class="create-row" style="flex-wrap: wrap; gap: 0.75rem;">
       <label class="field grow">
         <span>Новый тег</span>
         <input name="name" placeholder="Например: family" required />
       </label>
-      <button class="button" type="submit">Создать</button>
+      <label class="field grow" style="flex: 1.5;">
+        <span>Описание (необязательно)</span>
+        <input name="description" placeholder="Например: Видео с семейных мероприятий" />
+      </label>
+      <button class="button" type="submit" style="margin-top: 1.5rem;">Создать</button>
     </form>
   </section>
 
@@ -37,11 +41,14 @@
         </div>
         <div class="list selectable-list">
           {% for t in tags %}
-            <label class="list-row">
+            <label class="list-row" title="{% if t.description %}{{ t.description }}{% endif %}">
               <span class="list-check">
                 <input type="checkbox" name="tag_ids" value="{{ t.id }}" data-simple-select-item />
               </span>
               <span class="chip">#{{ t.name }}</span>
+              {% if t.description %}
+                <span class="list-hint tag-description">{{ t.description }}</span>
+              {% endif %}
               <span class="list-hint">ID {{ t.id }}</span>
             </label>
           {% endfor %}
