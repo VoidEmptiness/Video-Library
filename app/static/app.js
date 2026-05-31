@@ -564,59 +564,6 @@ function wireTagSearch() {
   }
 }
 
-function wireBulkTranscodeIndicators() {
-  const indicators = document.querySelectorAll("[data-transcode-indicator]");
-  if (indicators.length === 0) return;
-
-  let pollInterval = null;
-  let wasTranscoding = false;
-
-  async function checkAllProgress() {
-    try {
-      const response = await fetch("/api/videos/transcode-status");
-      if (!response.ok) return;
-      
-      const statusMap = await response.json();
-      let hasActiveTranscodes = false;
-      
-      for (const indicator of indicators) {
-        const videoId = indicator.dataset.transcodeIndicator;
-        const status = statusMap[videoId];
-        
-        if (status && status.status !== "done" && status.status !== "unknown") {
-          indicator.hidden = false;
-          hasActiveTranscodes = true;
-          wasTranscoding = true;
-        } else {
-          indicator.hidden = true;
-        }
-      }
-      
-      if (wasTranscoding && !hasActiveTranscodes) {
-        wasTranscoding = false;
-        window.location.reload();
-        return;
-      }
-      
-      if (!hasActiveTranscodes && pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-      } else if (hasActiveTranscodes && !pollInterval) {
-        pollInterval = setInterval(checkAllProgress, 1000);
-      }
-      
-    } catch (error) {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-      }
-    }
-  }
-
-  checkAllProgress();
-  pollInterval = setInterval(checkAllProgress, 1000);
-}
-
 function wireQualitySwitch() {
   const selector = document.querySelector("[data-quality-switch]");
   if (!selector) return;
@@ -681,7 +628,6 @@ document.addEventListener("DOMContentLoaded", () => {
   wireVideoPlayerShortcuts();
   wireVideoMeta();
   wireFolderToggles();
-  wireBulkTranscodeIndicators();
   wireQualitySwitch();
   wireVolumeSlider();
   applyDefaultVolume();

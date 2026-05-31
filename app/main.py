@@ -25,7 +25,6 @@ from .services.transcoding import (
     TRANSCODE_DOWNSCALE_HEIGHT,
     TRANSCODE_DOWNSCALE_MAX_HEIGHT,
     ffprobe_available,
-    read_progress,
     transcode_to_h264,
     video_fps,
     video_height,
@@ -909,111 +908,6 @@ def folder_view(
             "all_tags": _all_tags(db),
         },
     )
-
-
-@app.get("/api/videos")
-def api_list_videos(
-    db: Annotated[Session, Depends(get_db)],
-    _: User,
-    tags: str | None = None,
-    q: str | None = None,
-    untagged: bool = False,
-):
-    tag_ids = _tag_ids_from_csv(tags)
-    videos = list(db.execute(_video_query(db, tag_ids=tag_ids, q=q, untagged=untagged)).unique().scalars())
-    return [
-        {
-            "id": v.id,
-            "original_name": v.original_name,
-            "filename": v.filename,
-            "content_type": v.content_type,
-            "size_bytes": v.size_bytes,
-            "created_at": v.created_at.isoformat(),
-            "tags": [{"id": t.id, "name": t.name} for t in v.tags],
-            "has_thumbnail": bool(v.thumbnail_path),
-        }
-        for v in videos
-    ]
-
-
-@app.get("/api/tags")
-def api_list_tags(db: Annotated[Session, Depends(get_db)], _: User):
-    tags = list(db.scalars(select(Tag).order_by(Tag.name)))
-    return [{"id": t.id, "name": t.name} for t in tags]
-
-
-@app.post("/api/tags")
-def api_create_tag(
-    db: Annotated[Session, Depends(get_db)],
-    _: User,
-    name: Annotated[str, Form()],
-):
-    name = name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Empty name")
-    exists = db.scalar(select(func.count()).select_from(Tag).where(Tag.name == name))
-    if exists:
-        raise HTTPException(status_code=409, detail="Tag exists")
-    t = Tag(name=name)
-    db.add(t)
-    db.commit()
-    db.refresh(t)
-    return {"id": t.id, "name": t.name}
-
-
-@app.delete("/api/tags/{tag_id}")
-def api_delete_tag(db: Annotated[Session, Depends(get_db)], _: User, tag_id: int):
-    t = db.get(Tag, tag_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Not found")
-    db.delete(t)
-    db.commit()
-    return {"ok": True}
-
-
-@app.get("/api/folders")
-def api_list_folders(db: Annotated[Session, Depends(get_db)], _: User):
-    folders = list(
-        db.execute(select(Folder).options(joinedload(Folder.tags)).order_by(Folder.name)).unique().scalars()
-    )
-    return [
-        {
-            "id": f.id,
-            "name": f.name,
-            "match_all": f.match_all,
-            "tags": [{"id": t.id, "name": t.name} for t in f.tags],
-        }
-        for f in folders
-    ]
-
-
-@app.get("/api/folders/{folder_id}/videos")
-def api_folder_videos(db: Annotated[Session, Depends(get_db)], _: User, folder_id: int):
-    folder = (
-        db.execute(select(Folder).where(Folder.id == folder_id).options(joinedload(Folder.tags)))
-        .unique()
-        .scalar_one_or_none()
-    )
-    if not folder:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    vids = _folder_videos(db, folder)
-    return [{"id": v.id, "original_name": v.original_name} for v in vids]
-
-
-@app.get("/api/videos/{video_id}/transcode-progress")
-def api_transcode_progress(video_id: int):
-    return read_progress(video_id)
-
-
-@app.get("/api/videos/transcode-status")
-def api_transcode_status_bulk(db: Annotated[Session, Depends(get_db)]):
-    videos = list(db.scalars(select(Video).order_by(Video.created_at.desc())))
-    result = {}
-    for video in videos:
-        progress = read_progress(video.id)
-        if progress.get("status") not in ["done", "unknown"]:
-            result[video.id] = progress
-    return result
 
 
 @app.get("/settings", response_class=HTMLResponse)
