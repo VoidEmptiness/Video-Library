@@ -18,6 +18,7 @@ from .models import Base, Folder, Tag, Video
 from .services.auth import SESSION_COOKIE, create_session_token, parse_session_token, session_expiry_dt, verify_credentials
 from .services.storage import THUMB_DIR, VIDEO_DIR, ensure_dirs, unique_storage_name, video_path
 from .services.thumbnails import generate_thumbnail
+from .services.settings import get_setting, load_settings, save_settings
 from .services.transcoding import (
     FFPROBE_EXE,
     TRANSCODE_DOWNSCALE_FPS,
@@ -341,6 +342,8 @@ def _do_transcode(video_id: int, original_path: Path) -> None:
     from .database import SessionLocal as _SessionLocal
     from .models import Video as _Video
 
+    if not get_setting("transcode_to_720p", True):
+        return
     if not video_needs_downscale(original_path):
         return
 
@@ -1009,4 +1012,29 @@ def api_transcode_status_bulk(db: Annotated[Session, Depends(get_db)]):
         if progress.get("status") not in ["done", "unknown"]:
             result[video.id] = progress
     return result
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(
+    request: Request,
+    _: UserHTML,
+):
+    settings = load_settings()
+    return templates.TemplateResponse(
+        "settings.html",
+        {
+            "request": request,
+            "title": f"{APP_TITLE} — Настройки",
+            "transcode_to_720p": settings.get("transcode_to_720p", True),
+        },
+    )
+
+
+@app.post("/settings")
+def settings_save(
+    _: UserHTML,
+    transcode_to_720p: Annotated[str | None, Form()] = None,
+):
+    save_settings({"transcode_to_720p": transcode_to_720p == "1"})
+    return RedirectResponse(url="/settings", status_code=303)
 

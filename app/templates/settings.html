@@ -1,0 +1,40 @@
+{% extends "_layout.html" %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">Настройки</p>
+      <h1>Параметры</h1>
+    </div>
+  </section>
+
+  <section class="section-block">
+    <div class="panel-title">
+      <h2>Транскодирование видео</h2>
+      <p>Настройки автоматического перекодирования при загрузке видео.</p>
+    </div>
+
+    <form method="post" action="/settings" class="form-stack">
+      <label class="switch-row">
+        <input type="hidden" name="transcode_to_720p" value="0" />
+        <input type="checkbox" name="transcode_to_720p" value="1" {% if transcode_to_720p %}checked{% endif %} />
+        <span>Перекодировать видео в 720p</span>
+        {% if transcode_to_720p %}
+          <span class="chip" style="margin-left: auto">Включено</span>
+        {% else %}
+          <span class="chip" style="margin-left: auto; background: var(--surface-soft); color: var(--muted); border: 1px solid var(--line);">Отключено</span>
+        {% endif %}
+      </label>
+      <p class="status">
+        {% if transcode_to_720p %}
+          При загрузке видео с разрешением выше 1080p будет автоматически создана 720p-копия.
+        {% else %}
+          720p-копия не будет создаваться. Видео будет доступно только в оригинальном качестве.
+        {% endif %}
+      </p>
+
+      <div class="toolbar">
+        <button class="button" type="submit">Сохранить</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}
