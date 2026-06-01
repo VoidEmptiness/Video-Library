@@ -58,17 +58,27 @@ function wireUntaggedFilter() {
   syncTagState();
 }
 
-function wireBulkDelete() {
+function wireBulkActions() {
   const form = document.querySelector("[data-bulk-delete-form]");
+  const toggle = document.querySelector("[data-select-toggle]");
+  const bulkBar = form?.querySelector("[data-bulk-bar]");
+  const count = form?.querySelector("[data-selected-count]");
+  const deleteButton = form?.querySelector("[data-delete-selected]");
+  const selectAll = form?.querySelector("[data-select-all]");
+  const selectClear = form?.querySelector("[data-select-clear]");
+  const checks = Array.from(form?.querySelectorAll("[data-video-select]") || []);
+  const bulkTagsBtn = document.querySelector("[data-bulk-tags-btn]");
+  const modal = document.querySelector("[data-bulk-tags-modal]");
+  const modalInfo = modal?.querySelector("[data-bulk-tags-info]");
+  const tagChecks = Array.from(modal?.querySelectorAll("[data-bulk-tag-cb]") || []);
+  const applyBtn = modal?.querySelector("[data-bulk-tags-apply]");
+  const cancelBtn = modal?.querySelector("[data-bulk-tags-cancel]");
+  const hiddenForm = modal?.querySelector("[data-bulk-tags-form]");
+  const search = modal?.querySelector("[data-bulk-tag-search]");
+  const tagList = modal?.querySelector("[data-bulk-tag-list]");
+  const empty = modal?.querySelector("[data-bulk-tag-empty]");
   if (!form) return;
 
-  const toggle = document.querySelector("[data-select-toggle]");
-  const bulkBar = form.querySelector("[data-bulk-bar]");
-  const count = form.querySelector("[data-selected-count]");
-  const deleteButton = form.querySelector("[data-delete-selected]");
-  const selectAll = form.querySelector("[data-select-all]");
-  const selectClear = form.querySelector("[data-select-clear]");
-  const checks = Array.from(form.querySelectorAll("[data-video-select]"));
   let selectMode = false;
 
   function selectedCount() {
@@ -82,6 +92,7 @@ function wireBulkDelete() {
     if (toggle) toggle.textContent = selectMode ? "Готово" : "Выбрать";
     if (count) count.textContent = `${total} выбрано`;
     if (deleteButton) deleteButton.disabled = total === 0;
+    if (bulkTagsBtn) bulkTagsBtn.disabled = total === 0;
   }
 
   toggle?.addEventListener("click", () => {
@@ -128,6 +139,95 @@ function wireBulkDelete() {
       event.preventDefault();
     }
   });
+
+  if (bulkTagsBtn && modal) {
+    function selectedVideoIds() {
+      return checks.filter((c) => c.checked).map((c) => c.value);
+    }
+
+    function selectedTagValues() {
+      return tagChecks.filter((c) => c.checked).map((c) => c.value);
+    }
+
+    function syncApplyBtn() {
+      applyBtn.disabled = selectedTagValues().length === 0;
+    }
+
+    bulkTagsBtn.addEventListener("click", () => {
+      modalInfo.textContent = `${selectedVideoIds().length} видео`;
+      modal.hidden = false;
+      syncApplyBtn();
+    });
+
+    for (const cb of tagChecks) {
+      cb.addEventListener("change", syncApplyBtn);
+    }
+
+    cancelBtn?.addEventListener("click", () => {
+      modal.hidden = true;
+    });
+
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        modal.hidden = true;
+      }
+    });
+
+    applyBtn?.addEventListener("click", () => {
+      const ids = selectedVideoIds();
+      const tagVals = selectedTagValues();
+      if (ids.length === 0 || tagVals.length === 0) return;
+
+      hiddenForm.querySelectorAll("input[type=hidden]").forEach((el) => el.remove());
+
+      const returnTo = form.querySelector('input[name="return_to"]');
+      if (returnTo) {
+        const rt = document.createElement("input");
+        rt.type = "hidden";
+        rt.name = "return_to";
+        rt.value = returnTo.value;
+        hiddenForm.appendChild(rt);
+      }
+
+      for (const vid of ids) {
+        const inp = document.createElement("input");
+        inp.type = "hidden";
+        inp.name = "video_ids";
+        inp.value = vid;
+        hiddenForm.appendChild(inp);
+      }
+
+      for (const tid of tagVals) {
+        const inp = document.createElement("input");
+        inp.type = "hidden";
+        inp.name = "tag_ids";
+        inp.value = tid;
+        hiddenForm.appendChild(inp);
+      }
+
+      hiddenForm.submit();
+    });
+
+    if (search && tagList) {
+      const tags = Array.from(tagList.querySelectorAll("[data-bulk-tag-name]"));
+      if (tags.length > 0) {
+        function applyFilter() {
+          const query = normalizeTagQuery(search.value);
+          let visibleCount = 0;
+          for (const tag of tags) {
+            const tagName = tag.dataset.bulkTagName || "";
+            const label = tag.textContent || "";
+            const isVisible = !query || tagName.includes(query) || normalizeTagQuery(label).includes(query);
+            tag.hidden = !isVisible;
+            if (isVisible) visibleCount += 1;
+          }
+          if (empty) empty.hidden = visibleCount !== 0;
+        }
+        search.addEventListener("input", applyFilter);
+        applyFilter();
+      }
+    }
+  }
 
   syncBulkUi();
 }
@@ -595,32 +695,111 @@ function wireVolumeSlider() {
   const slider = document.querySelector("[data-volume-slider]");
   const label = document.querySelector("[data-volume-label]");
   if (!slider || !label) return;
+  if (document.querySelector("video.player")) return;
 
-  function updateLabel() {
-    const pct = Math.round(parseFloat(slider.value) * 100);
+  function update() {
+    const val = parseFloat(slider.value);
+    const pct = Math.round(val * 100);
     label.textContent = `${pct}%`;
+    slider.style.setProperty("--volume-pct", `${pct}%`);
   }
 
-  slider.addEventListener("input", updateLabel);
+  slider.addEventListener("input", update);
+  update();
 }
 
 function applyDefaultVolume() {
   const video = document.querySelector("video.player");
   if (!video) return;
+  const el = document.querySelector("[data-default-volume]");
+  if (!el) return;
+  const vol = parseFloat(el.value);
+  if (isNaN(vol)) return;
 
-  const volumeEl = document.querySelector("[data-default-volume]");
-  if (!volumeEl) return;
-
-  const vol = parseFloat(volumeEl.value);
-  if (!isNaN(vol)) {
+  function set() {
     video.volume = Math.max(0, Math.min(1, vol));
   }
+
+  if (video.readyState >= 1) {
+    set();
+  } else {
+    video.addEventListener("loadedmetadata", set, { once: true });
+  }
+}
+
+function wireCustomVolume() {
+  const video = document.querySelector("video.player");
+  if (!video) return;
+
+  const slider = document.querySelector("[data-volume-slider]");
+  const label = document.querySelector("[data-volume-label]");
+  const toggle = document.querySelector("[data-volume-toggle]");
+  if (!slider) return;
+
+  let prevVolume = 1;
+
+  function sync() {
+    const vol = video.volume;
+    const pct = Math.round(vol * 100);
+    slider.value = vol;
+    slider.style.setProperty("--volume-pct", `${pct}%`);
+    if (label) label.textContent = `${pct}%`;
+    if (toggle) toggle.classList.toggle("muted", vol === 0);
+  }
+
+  slider.addEventListener("input", () => {
+    video.volume = parseFloat(slider.value);
+    sync();
+  });
+
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      if (video.volume > 0) {
+        prevVolume = video.volume;
+        video.volume = 0;
+      } else {
+        video.volume = prevVolume;
+      }
+      sync();
+    });
+  }
+
+  video.addEventListener("volumechange", sync);
+
+  function onReady() {
+    sync();
+  }
+
+  if (video.readyState >= 1) {
+    onReady();
+  } else {
+    video.addEventListener("loadedmetadata", onReady, { once: true });
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (isTypingTarget(event.target)) return;
+    if (event.altKey || event.metaKey || event.ctrlKey) return;
+    if (document.querySelector("video.player") !== video) return;
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      video.volume = Math.min(1, video.volume + 0.1);
+      sync();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      video.volume = Math.max(0, video.volume - 0.1);
+      sync();
+      return;
+    }
+  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   wireSearchForm();
   wireUntaggedFilter();
-  wireBulkDelete();
+  wireBulkActions();
   wireSimpleSelect();
   wireDropzone();
   wireThemeToggle();
@@ -631,4 +810,5 @@ document.addEventListener("DOMContentLoaded", () => {
   wireQualitySwitch();
   wireVolumeSlider();
   applyDefaultVolume();
+  wireCustomVolume();
 });

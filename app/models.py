@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -37,7 +41,7 @@ class Video(Base):
     original_name: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     thumbnail_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     tags: Mapped[list[Tag]] = relationship(
@@ -54,7 +58,7 @@ class Tag(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     description: Mapped[str | None] = mapped_column(String(256), nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     videos: Mapped[list[Video]] = relationship(
         "Video",
@@ -75,7 +79,7 @@ class Folder(Base):
     name: Mapped[str] = mapped_column(String(128))
     match_all: Mapped[bool] = mapped_column(Boolean, default=False)
     parent_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     tags: Mapped[list[Tag]] = relationship(
         "Tag",

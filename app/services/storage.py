@@ -38,6 +38,3 @@ def video_path(filename: str) -> Path:
     return VIDEO_DIR / filename
 
 
-def thumb_path(filename_no_ext: str) -> Path:
-    return THUMB_DIR / f"{filename_no_ext}.jpg"
-

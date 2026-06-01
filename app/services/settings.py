@@ -40,9 +40,3 @@ def save_settings(settings: dict) -> None:
 
 def get_setting(key: str, default=None):
     return load_settings().get(key, default)
-
-
-def set_setting(key: str, value) -> None:
-    settings = load_settings()
-    settings[key] = value
-    save_settings(settings)

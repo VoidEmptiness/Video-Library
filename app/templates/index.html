@@ -105,6 +105,7 @@
           <div class="toolbar">
             <button class="button secondary compact" type="button" data-select-all>Выбрать все</button>
             <button class="button secondary compact" type="button" data-select-clear>Снять выбор</button>
+            <button class="button secondary compact" type="button" disabled data-bulk-tags-btn>Назначить теги</button>
             <button class="button danger compact" type="submit" disabled data-delete-selected>Удалить выбранные</button>
           </div>
         </div>
@@ -141,6 +142,40 @@
           {% endfor %}
         </div>
       </form>
+
+      <div class="modal-overlay" data-bulk-tags-modal hidden>
+        <div class="modal">
+          <div class="modal-title">
+            <h3>Назначить теги</h3>
+            <p data-bulk-tags-info>выбранным видео</p>
+          </div>
+          {% if all_tags|length > 0 %}
+            <label class="field tag-search">
+              <span>Найти тег</span>
+              <input type="search" data-bulk-tag-search placeholder="Начните вводить название" autocomplete="off" />
+            </label>
+          {% endif %}
+          <div class="tags" data-bulk-tag-list>
+            {% for t in all_tags %}
+              <label class="pill" data-bulk-tag-name="{{ t.name|lower }}"{% if t.description %} title="{{ t.description }}"{% endif %}>
+                <input type="checkbox" data-bulk-tag-cb value="{{ t.id }}" />
+                <span>#{{ t.name }}</span>
+              </label>
+            {% endfor %}
+            {% if all_tags|length == 0 %}
+              <span class="empty-inline">Сначала создайте теги</span>
+            {% endif %}
+          </div>
+          <span class="empty-inline tag-search-empty" data-bulk-tag-empty hidden>Теги не найдены</span>
+          <div class="toolbar">
+            <button class="button" type="button" data-bulk-tags-apply disabled>Применить</button>
+            <button class="button secondary" type="button" data-bulk-tags-cancel>Отмена</button>
+          </div>
+          <form method="post" action="/videos/tags-bulk" data-bulk-tags-form>
+            <input type="hidden" name="return_to" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}" />
+          </form>
+        </div>
+      </div>
     {% endif %}
   </section>
 {% endblock %}

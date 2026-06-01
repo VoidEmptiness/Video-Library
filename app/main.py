@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import json
 import subprocess
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
@@ -29,14 +32,23 @@ from .services.transcoding import (
     video_fps,
     video_height,
     video_needs_downscale,
-    video_needs_transcode,
 )
 
+logger = logging.getLogger(__name__)
 
 APP_TITLE = os.getenv("APP_TITLE", "Video Library")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates.env.globals["static_version"] = str(int(time.time()))
 
-app = FastAPI(title=APP_TITLE)
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    ensure_dirs()
+    init_db()
+    yield
+
+
+app = FastAPI(title=APP_TITLE, lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 
@@ -68,11 +80,11 @@ def _migrate_db() -> None:
         for ix_name in indexes:
             if ix_name and "name" in ix_name.lower():
                 with engine.connect() as conn:
-                    conn.execute(text(f"DROP INDEX IF EXISTS {ix_name}"))
+                    conn.execute(text("DROP INDEX IF EXISTS \"%s\"" % ix_name))
                     conn.commit()
                 break
     except Exception:
-        pass
+        logger.exception("Migration failed (folders)")
 
     try:
         inspector = inspect(engine)
@@ -82,13 +94,7 @@ def _migrate_db() -> None:
                 conn.execute(text("ALTER TABLE tags ADD COLUMN description VARCHAR(256)"))
                 conn.commit()
     except Exception:
-        pass
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    ensure_dirs()
-    init_db()
+        logger.exception("Migration failed (tags)")
 
 
 def _wants_auth() -> bool:
@@ -348,9 +354,6 @@ def index(
 
 
 def _do_transcode(video_id: int, original_path: Path) -> None:
-    from .database import SessionLocal as _SessionLocal
-    from .models import Video as _Video
-
     if not get_setting("transcode_to_720p", True):
         return
     if not video_needs_downscale(original_path):
@@ -375,15 +378,15 @@ def _do_transcode(video_id: int, original_path: Path) -> None:
     ):
         return
 
-    db = _SessionLocal()
+    db = SessionLocal()
     try:
-        video = db.get(_Video, video_id)
+        video = db.get(Video, video_id)
         if video:
             video.filename_720p = out_name
             db.add(video)
             db.commit()
     except Exception:
-        pass
+        logger.exception("Failed to save transcode result for video %s", video_id)
     finally:
         db.close()
 
@@ -408,13 +411,21 @@ async def upload_video(
         dest = video_path(storage_name)
 
         size = 0
-        with dest.open("wb") as f:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                f.write(chunk)
+        try:
+            with dest.open("wb") as f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    f.write(chunk)
+        except OSError as e:
+            if dest.exists():
+                dest.unlink()
+            logger.exception("Disk error while saving %s", file.filename)
+            if hasattr(e, 'errno') and e.errno == 28:
+                raise HTTPException(status_code=507, detail="Недостаточно места на диске")
+            raise HTTPException(status_code=500, detail="Ошибка записи файла на диск")
 
         video = Video(
             filename=storage_name,
@@ -448,7 +459,6 @@ def video_page(
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    db.refresh(video)
     media_path = video_path(video.filename)
     codec_name, duration_seconds, video_width, video_height = _probe_video_metadata(media_path) if media_path.exists() else (None, None, None, None)
     resolution_label = f"{video_width}×{video_height}" if video_width and video_height else None
@@ -473,6 +483,41 @@ def video_page(
     )
 
 
+def _stream_file(path: Path, media_type: str, request: Request) -> FileResponse | StreamingResponse:
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    file_size = path.stat().st_size
+    range_header = request.headers.get("range")
+
+    if not range_header:
+        return FileResponse(path=str(path), media_type=media_type)
+
+    parsed = _parse_range_header(range_header, file_size)
+    if not parsed:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+
+    start, end = parsed
+    chunk_size = (end - start) + 1
+
+    def iter_file():
+        with path.open("rb") as fh:
+            fh.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                data = fh.read(min(1024 * 1024, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Content-Length": str(chunk_size),
+    }
+    return StreamingResponse(iter_file(), status_code=206, media_type=media_type, headers=headers)
+
+
 @app.get("/media/720p/{video_id}")
 def media_stream_720p(
     video_id: int,
@@ -485,40 +530,7 @@ def media_stream_720p(
         raise HTTPException(status_code=404, detail="Video not found")
     if not video.filename_720p:
         raise HTTPException(status_code=404, detail="720p version not available")
-    path = video_path(video.filename_720p)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File missing on disk")
-    file_size = path.stat().st_size
-    range_header = request.headers.get("range")
-    media_type = "video/mp4"
-
-    if not range_header:
-        return FileResponse(path=str(path), media_type=media_type)
-
-    parsed = _parse_range_header(range_header, file_size)
-    if not parsed:
-        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
-
-    start, end = parsed
-    chunk_size = (end - start) + 1
-
-    def iter_file():
-        with path.open("rb") as fh:
-            fh.seek(start)
-            remaining = chunk_size
-            while remaining > 0:
-                data = fh.read(min(1024 * 1024, remaining))
-                if not data:
-                    break
-                remaining -= len(data)
-                yield data
-
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Range": f"bytes {start}-{end}/{file_size}",
-        "Content-Length": str(chunk_size),
-    }
-    return StreamingResponse(iter_file(), status_code=206, media_type=media_type, headers=headers)
+    return _stream_file(video_path(video.filename_720p), "video/mp4", request)
 
 
 @app.get("/media/{video_id}")
@@ -531,40 +543,7 @@ def media_stream(
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    path = video_path(video.filename)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File missing on disk")
-    file_size = path.stat().st_size
-    range_header = request.headers.get("range")
-    media_type = video.content_type or "application/octet-stream"
-
-    if not range_header:
-        return FileResponse(path=str(path), media_type=media_type)
-
-    parsed = _parse_range_header(range_header, file_size)
-    if not parsed:
-        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
-
-    start, end = parsed
-    chunk_size = (end - start) + 1
-
-    def iter_file():
-        with path.open("rb") as fh:
-            fh.seek(start)
-            remaining = chunk_size
-            while remaining > 0:
-                data = fh.read(min(1024 * 1024, remaining))
-                if not data:
-                    break
-                remaining -= len(data)
-                yield data
-
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Range": f"bytes {start}-{end}/{file_size}",
-        "Content-Length": str(chunk_size),
-    }
-    return StreamingResponse(iter_file(), status_code=206, media_type=media_type, headers=headers)
+    return _stream_file(video_path(video.filename), video.content_type or "application/octet-stream", request)
 
 
 @app.get("/thumb/{video_id}")
@@ -595,6 +574,42 @@ def delete_video(
     db.delete(video)
     db.commit()
     return _redirect("/")
+
+
+@app.post("/videos/tags-bulk")
+def tags_bulk(
+    db: Annotated[Session, Depends(get_db)],
+    _: UserHTML,
+    video_ids: Annotated[list[int] | None, Form()] = None,
+    tag_ids: Annotated[list[int] | None, Form()] = None,
+    return_to: Annotated[str | None, Form()] = None,
+):
+    if not video_ids:
+        return _redirect(_safe_return_to(return_to))
+
+    tag_objs: list[Tag] = []
+    if tag_ids:
+        tag_objs = list(db.scalars(select(Tag).where(Tag.id.in_(tag_ids)).order_by(Tag.name)))
+
+    if not tag_objs:
+        return _redirect(_safe_return_to(return_to))
+
+    videos = list(
+        db.execute(
+            select(Video).where(Video.id.in_(video_ids)).options(joinedload(Video.tags))
+        )
+        .unique()
+        .scalars()
+    )
+    for video in videos:
+        existing_ids = {t.id for t in video.tags}
+        for tag in tag_objs:
+            if tag.id not in existing_ids:
+                video.tags.append(tag)
+        db.add(video)
+    db.commit()
+
+    return _redirect(_safe_return_to(return_to))
 
 
 @app.post("/videos/delete-selected")
@@ -870,7 +885,7 @@ def folder_edit(
         raise HTTPException(status_code=404, detail="Folder not found")
     folder.name = name.strip() or folder.name
     folder.match_all = bool(match_all)
-    if parent_id and parent_id != folder.id and db.get(Folder, parent_id):
+    if parent_id and parent_id != folder.id and db.get(Folder, parent_id) and not _would_create_cycle(db, folder.id, parent_id):
         folder.parent_id = parent_id
     else:
         folder.parent_id = None
@@ -883,30 +898,35 @@ def folder_edit(
     return _redirect("/folders")
 
 
+def _would_create_cycle(db: Session, folder_id: int, parent_id: int | None) -> bool:
+    if not parent_id:
+        return False
+    current = parent_id
+    seen = {folder_id}
+    while current is not None:
+        if current in seen:
+            return True
+        seen.add(current)
+        parent = db.get(Folder, current)
+        current = parent.parent_id if parent else None
+    return False
+
+
 def _folder_videos(db: Session, folder: Folder):
     tag_ids = [t.id for t in folder.tags]
     if not tag_ids:
         return []
 
+    stmt = (
+        select(Video)
+        .join(Video.tags)
+        .where(Tag.id.in_(tag_ids))
+        .group_by(Video.id)
+        .options(joinedload(Video.tags))
+        .order_by(Video.created_at.desc())
+    )
     if folder.match_all:
-        stmt = (
-            select(Video)
-            .join(Video.tags)
-            .where(Tag.id.in_(tag_ids))
-            .group_by(Video.id)
-            .having(func.count(func.distinct(Tag.id)) == len(tag_ids))
-            .options(joinedload(Video.tags))
-            .order_by(Video.created_at.desc())
-        )
-    else:
-        stmt = (
-            select(Video)
-            .join(Video.tags)
-            .where(Tag.id.in_(tag_ids))
-            .group_by(Video.id)
-            .options(joinedload(Video.tags))
-            .order_by(Video.created_at.desc())
-        )
+        stmt = stmt.having(func.count(func.distinct(Tag.id)) == len(tag_ids))
     return list(db.execute(stmt).unique().scalars())
 
 

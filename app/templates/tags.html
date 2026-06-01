@@ -11,16 +11,16 @@
   </section>
 
   <section class="panel">
-    <form method="post" action="/tags/create" class="create-row" style="flex-wrap: wrap; gap: 0.75rem;">
+    <form method="post" action="/tags/create" class="create-row">
       <label class="field grow">
         <span>Новый тег</span>
         <input name="name" placeholder="Например: family" required />
       </label>
-      <label class="field grow" style="flex: 1.5;">
+      <label class="field grow-wide">
         <span>Описание (необязательно)</span>
         <input name="description" placeholder="Например: Видео с семейных мероприятий" />
       </label>
-      <button class="button" type="submit" style="margin-top: 1.5rem;">Создать</button>
+      <button class="button create-btn" type="submit">Создать</button>
     </form>
   </section>
 
@@ -52,7 +52,7 @@
                     <span class="list-hint tag-description">{{ t.description }}</span>
                   {% endif %}
                   <span class="list-hint">ID {{ t.id }}</span>
-                  <span class="button secondary ghost compact" style="margin-left: 0.5rem;" onclick="event.stopPropagation(); document.querySelector('[data-edit-box=\'{{ t.id }}\']').open = !document.querySelector('[data-edit-box=\'{{ t.id }}\']').open;">✎</span>
+                  <span class="button secondary ghost compact edit-trigger" onclick="event.stopPropagation(); document.querySelector('[data-edit-box=\'{{ t.id }}\']').open = !document.querySelector('[data-edit-box=\'{{ t.id }}\']').open;">✎</span>
                 </label>
               </summary>
               <div class="edit-form">
@@ -67,7 +67,7 @@
                       <input name="description" value="{{ t.description or '' }}" placeholder="Необязательно" data-edit-desc="{{ t.id }}" />
                     </label>
                   </div>
-                  <div style="display: flex; gap: 0.5rem;">
+                  <div class="edit-actions">
                     <button class="button" type="button" onclick="
                       var name = document.querySelector('[data-edit-name=\'{{ t.id }}\']').value;
                       var desc = document.querySelector('[data-edit-desc=\'{{ t.id }}\']').value;

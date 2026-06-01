@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -51,7 +54,8 @@ TRANSCODE_DOWNSCALE_HEIGHT = int(os.getenv("TRANSCODE_DOWNSCALE_HEIGHT", "720"))
 TRANSCODE_DOWNSCALE_MAX_HEIGHT = int(os.getenv("TRANSCODE_DOWNSCALE_MAX_HEIGHT", "1080"))
 TRANSCODE_DOWNSCALE_FPS = int(os.getenv("TRANSCODE_DOWNSCALE_FPS", "24"))
 
-PROGRESS_DIR = Path(os.getenv("TRANSCODE_PROGRESS_DIR", "transcode_progress"))
+_APP_DIR = Path(__file__).resolve().parent.parent
+PROGRESS_DIR = Path(os.getenv("TRANSCODE_PROGRESS_DIR", str(_APP_DIR / "transcode_progress")))
 
 
 def ffmpeg_available() -> bool:
@@ -60,38 +64,6 @@ def ffmpeg_available() -> bool:
 
 def ffprobe_available() -> bool:
     return FFPROBE_EXE is not None and FFPROBE_EXE.exists()
-
-
-def video_codec(input_path: Path) -> str | None:
-    if not ffprobe_available():
-        return None
-
-    cmd = [
-        str(FFPROBE_EXE),
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=codec_name",
-        "-of",
-        "default=nokey=1:noprint_wrappers=1",
-        str(input_path),
-    ]
-
-    try:
-        result = subprocess.run(
-            cmd,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=30,
-        )
-        codec = result.stdout.strip().lower()
-        return codec or None
-    except Exception:
-        return None
 
 
 def video_fps(input_path: Path) -> float | None:
@@ -142,15 +114,6 @@ def video_height(input_path: Path) -> int | None:
         return int(raw) if raw else None
     except Exception:
         return None
-
-
-def video_needs_transcode(input_path: Path) -> bool:
-    if not TRANSCODE_ENABLED:
-        return False
-    codec = video_codec(input_path)
-    if codec is None:
-        return False
-    return codec != "h264"
 
 
 def video_needs_downscale(input_path: Path) -> bool:
@@ -219,7 +182,7 @@ def transcode_to_h264(
                 if len(lines) >= 2:
                     duration = float(lines[0].strip()) if lines[0].strip() else None
         except Exception:
-            pass
+            logger.exception("Failed to probe duration for transcode %s", input_path)
 
     if video_id:
         write_progress(video_id, "Подготовка...", 0)
@@ -238,8 +201,8 @@ def transcode_to_h264(
         "-map", "0:v:0",
         "-map", "0:a?",
         "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "30",
+        "-preset", TRANSCODE_PRESET,
+        "-crf", TRANSCODE_CRF,
         "-tune", "fastdecode",
         "-profile:v", "main",
         "-pix_fmt", "yuv420p",

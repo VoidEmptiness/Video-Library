@@ -24,9 +24,9 @@
       <h2>Вложенные папки</h2>
       <span>{{ folder.children|length }}</span>
     </div>
-    <details class="edit-box" style="margin-bottom: 16px;">
-      <summary class="button secondary compact" style="margin-bottom: 12px;">+ Создать вложенную папку</summary>
-      <form method="post" action="/folders/create" class="form-stack" style="margin-bottom: 16px;">
+    <details class="edit-box edit-box-condensed">
+      <summary class="button secondary compact">+ Создать вложенную папку</summary>
+      <form method="post" action="/folders/create" class="form-stack">
         <input type="hidden" name="parent_id" value="{{ folder.id }}" />
         <div class="form-grid">
           <label class="field">

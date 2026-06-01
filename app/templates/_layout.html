@@ -17,8 +17,8 @@
     })();
   </script>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/app.css" />
-  <script defer src="/static/app.js"></script>
+  <link rel="stylesheet" href="/static/app.css?{{ static_version }}" />
+  <script defer src="/static/app.js?{{ static_version }}"></script>
 </head>
 <body>
   {% set path = request.url.path %}
