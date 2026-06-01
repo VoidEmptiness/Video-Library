@@ -714,6 +714,26 @@ def tag_create(
     return _redirect("/tags")
 
 
+@app.post("/tags/{tag_id}/edit")
+def tag_edit(
+    tag_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: UserHTML,
+    name: Annotated[str, Form()],
+    description: Annotated[str | None, Form()] = None,
+):
+    tag = db.get(Tag, tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    name = name.strip()
+    if name:
+        tag.name = name
+    tag.description = description.strip() if description else None
+    db.add(tag)
+    db.commit()
+    return _redirect("/tags")
+
+
 @app.post("/tags/{tag_id}/delete")
 def tag_delete(
     tag_id: int,

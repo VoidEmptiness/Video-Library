@@ -41,16 +41,46 @@
         </div>
         <div class="list selectable-list">
           {% for t in tags %}
-            <label class="list-row" title="{% if t.description %}{{ t.description }}{% endif %}">
-              <span class="list-check">
-                <input type="checkbox" name="tag_ids" value="{{ t.id }}" data-simple-select-item />
-              </span>
-              <span class="chip">#{{ t.name }}</span>
-              {% if t.description %}
-                <span class="list-hint tag-description">{{ t.description }}</span>
-              {% endif %}
-              <span class="list-hint">ID {{ t.id }}</span>
-            </label>
+            <details class="edit-box" data-edit-box="{{ t.id }}">
+              <summary>
+                <label class="list-row" onclick="event.stopPropagation()" title="{% if t.description %}{{ t.description }}{% endif %}">
+                  <span class="list-check">
+                    <input type="checkbox" name="tag_ids" value="{{ t.id }}" data-simple-select-item />
+                  </span>
+                  <span class="chip">#{{ t.name }}</span>
+                  {% if t.description %}
+                    <span class="list-hint tag-description">{{ t.description }}</span>
+                  {% endif %}
+                  <span class="list-hint">ID {{ t.id }}</span>
+                  <span class="button secondary ghost compact" style="margin-left: 0.5rem;" onclick="event.stopPropagation(); document.querySelector('[data-edit-box=\'{{ t.id }}\']').open = !document.querySelector('[data-edit-box=\'{{ t.id }}\']').open;">✎</span>
+                </label>
+              </summary>
+              <div class="edit-form">
+                <div class="form-stack" data-edit-form="{{ t.id }}">
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Название</span>
+                      <input name="name" value="{{ t.name }}" required data-edit-name="{{ t.id }}" />
+                    </label>
+                    <label class="field">
+                      <span>Описание</span>
+                      <input name="description" value="{{ t.description or '' }}" placeholder="Необязательно" data-edit-desc="{{ t.id }}" />
+                    </label>
+                  </div>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <button class="button" type="button" onclick="
+                      var name = document.querySelector('[data-edit-name=\'{{ t.id }}\']').value;
+                      var desc = document.querySelector('[data-edit-desc=\'{{ t.id }}\']').value;
+                      var fd = new FormData();
+                      fd.append('name', name);
+                      fd.append('description', desc);
+                      fetch('/tags/{{ t.id }}/edit', { method: 'POST', body: fd }).then(function(r){ if(r.ok) location.reload(); });
+                    ">Сохранить</button>
+                    <button class="button secondary ghost compact" type="button" onclick="document.querySelector('[data-edit-box=\'{{ t.id }}\']').open = false;">Отмена</button>
+                  </div>
+                </div>
+              </div>
+            </details>
           {% endfor %}
         </div>
       </form>
