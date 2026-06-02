@@ -16,6 +16,8 @@ services:
       TRANSCODE_PRESET: "medium"
       TRANSCODE_TIMEOUT_SECONDS: "3600"
       THUMBNAIL_TIMEOUT_SECONDS: "30"
+      MAX_FILES_PER_UPLOAD: "100"
+      THUMBNAIL_CONCURRENCY: "4"
     volumes:
       - videodata:/data
 

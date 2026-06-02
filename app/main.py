@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import json
@@ -37,6 +38,8 @@ from .services.transcoding import (
 logger = logging.getLogger(__name__)
 
 APP_TITLE = os.getenv("APP_TITLE", "Video Library")
+MAX_FILES_PER_UPLOAD = int(os.getenv("MAX_FILES_PER_UPLOAD", "50"))
+THUMBNAIL_CONCURRENCY = int(os.getenv("THUMBNAIL_CONCURRENCY", "4"))
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["static_version"] = str(int(time.time()))
 
@@ -391,6 +394,30 @@ def _do_transcode(video_id: int, original_path: Path) -> None:
         db.close()
 
 
+async def _generate_all_thumbnails(pairs: list[tuple[int, Path]]) -> None:
+    sem = asyncio.Semaphore(THUMBNAIL_CONCURRENCY)
+
+    async def _one(video_id: int, src: Path) -> None:
+        async with sem:
+            thumb = THUMB_DIR / f"{video_id}.jpg"
+            ok = await asyncio.to_thread(generate_thumbnail, src, thumb)
+            if not ok:
+                return
+            db = SessionLocal()
+            try:
+                video = db.get(Video, video_id)
+                if video:
+                    video.thumbnail_path = str(thumb)
+                    db.add(video)
+                    db.commit()
+            except Exception:
+                logger.exception("Failed to save thumbnail for video %s", video_id)
+            finally:
+                db.close()
+
+    await asyncio.gather(*[_one(vid, p) for vid, p in pairs])
+
+
 @app.post("/videos/upload")
 async def upload_video(
     background_tasks: BackgroundTasks,
@@ -400,8 +427,15 @@ async def upload_video(
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No files")
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Слишком много файлов. Максимум: {MAX_FILES_PER_UPLOAD}",
+        )
     ensure_dirs()
     created_ids: list[int] = []
+    thumb_pairs: list[tuple[int, Path]] = []
+    transcode_args: list[tuple[int, Path]] = []
 
     for file in files:
         if not file.filename:
@@ -436,14 +470,15 @@ async def upload_video(
         db.add(video)
         db.flush()
 
-        thumb = THUMB_DIR / f"{video.id}.jpg"
-        if generate_thumbnail(dest, thumb):
-            video.thumbnail_path = str(thumb)
-
-        background_tasks.add_task(_do_transcode, video.id, dest)
+        thumb_pairs.append((video.id, dest))
+        transcode_args.append((video.id, dest))
 
         created_ids.append(video.id)
 
+    if thumb_pairs:
+        background_tasks.add_task(_generate_all_thumbnails, thumb_pairs)
+    for video_id, dest in transcode_args:
+        background_tasks.add_task(_do_transcode, video_id, dest)
     db.commit()
     ids_str = ",".join(str(x) for x in created_ids)
     return RedirectResponse(url=f"/upload/tags?ids={ids_str}", status_code=303)
