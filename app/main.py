@@ -581,6 +581,49 @@ def media_stream(
     return _stream_file(video_path(video.filename), video.content_type or "application/octet-stream", request)
 
 
+@app.get("/download/{video_id}")
+def video_download(
+    video_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    path = video_path(video.filename)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    return FileResponse(
+        path=str(path),
+        media_type="application/octet-stream",
+        filename=video.original_name,
+    )
+
+
+@app.get("/download/720p/{video_id}")
+def video_download_720p(
+    video_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if not video.filename_720p:
+        raise HTTPException(status_code=404, detail="720p version not available")
+    path = video_path(video.filename_720p)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    from pathlib import PurePath
+    stem = PurePath(video.original_name).stem
+    download_name = f"{stem}_720p.mp4"
+    return FileResponse(
+        path=str(path),
+        media_type="application/octet-stream",
+        filename=download_name,
+    )
+
+
 @app.get("/thumb/{video_id}")
 def thumb_get(
     video_id: int,

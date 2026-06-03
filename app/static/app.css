@@ -225,6 +225,13 @@ html[data-theme="dark"] .brand-mark {
   letter-spacing: 0;
 }
 
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .eyebrow {
   margin-bottom: 8px;
   color: var(--accent-strong);

@@ -5,9 +5,15 @@
       <p class="eyebrow">Просмотр</p>
       <h1 title="{{ video.original_name }}">{{ video.original_name|short_name }}<span class="transcode-icon-inline transcode-icon-video" data-transcode-indicator="{{ video.id }}" hidden>⚙</span></h1>
     </div>
-    <form method="post" action="/videos/{{ video.id }}/delete" onsubmit="return confirm('Удалить видео?');">
-      <button class="button danger" type="submit">Удалить</button>
-    </form>
+    <div class="page-actions">
+      <a href="/download/{{ video.id }}" class="button secondary" download>Скачать</a>
+      {% if has_720p %}
+      <a href="/download/720p/{{ video.id }}" class="button secondary" download>Скачать 720p</a>
+      {% endif %}
+      <form method="post" action="/videos/{{ video.id }}/delete" onsubmit="return confirm('Удалить видео?');">
+        <button class="button danger" type="submit">Удалить</button>
+      </form>
+    </div>
   </section>
 
   <section class="player-shell">
