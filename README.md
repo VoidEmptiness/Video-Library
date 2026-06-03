@@ -48,10 +48,6 @@ git clone https://github.com/VoidEmptiness/Video-Library.git && cd Video-Library
 | `/upload/tags?ids=...` | Назначение тегов свежезагруженным видео |
 | `/settings` | Настройки приложения — включение/отключение транскодирования |
 
-## API
-
-Вырезаны
-
 ## Структура хранилища
 
 ```

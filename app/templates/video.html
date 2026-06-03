@@ -16,14 +16,59 @@
     </div>
   </section>
 
-  <section class="player-shell">
+  <section class="player-shell" data-player-shell>
     <input type="hidden" data-default-volume value="{{ default_volume }}" />
-    <video class="player" controls preload="auto">
-      <source src="/media/{{ video.id }}" type="{{ video.content_type }}" data-quality="original" />
-      {% if has_720p %}
-      <source src="/media/720p/{{ video.id }}" type="video/mp4" data-quality="720p" />
-      {% endif %}
-    </video>
+    <div class="player-wrapper" data-player-wrapper>
+      <video class="player" preload="auto">
+        <source src="/media/{{ video.id }}" type="{{ video.content_type }}" data-quality="original" />
+        {% if has_720p %}
+        <source src="/media/720p/{{ video.id }}" type="video/mp4" data-quality="720p" />
+        {% endif %}
+      </video>
+
+      <div class="player-controls" data-player-controls>
+        <div class="pc-left">
+          <button type="button" class="pc-btn pc-play" data-pc-play aria-label="Play/Pause">
+            <svg class="pc-play-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <svg class="pc-pause-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+          <span class="pc-time" data-pc-time>0:00 / 0:00</span>
+        </div>
+
+        <div class="pc-center">
+          <div class="pc-seek" data-pc-seek>
+            <div class="pc-seek-track" data-pc-seek-track>
+              <div class="pc-seek-fill" data-pc-seek-fill></div>
+              <div class="pc-seek-thumb" data-pc-seek-thumb></div>
+            </div>
+            <input type="range" class="pc-seek-input" data-pc-seek-input min="0" max="1000" step="0.1" value="0" aria-label="Seek" />
+          </div>
+        </div>
+
+        <div class="pc-right">
+          <div class="pc-volume" data-pc-volume>
+            <button type="button" class="pc-btn pc-vol-btn" data-pc-vol-btn aria-label="Mute/Unmute">
+              <svg class="pc-vol-high" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              <svg class="pc-vol-low" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              <svg class="pc-vol-muted" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            </button>
+            <input type="range" class="pc-vol-slider" data-pc-vol-slider min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+          </div>
+
+          {% if has_720p %}
+          <select class="pc-quality" data-quality-switch data-video-id="{{ video.id }}" aria-label="Quality">
+            <option value="original">Оригинал</option>
+            <option value="720p">720p</option>
+          </select>
+          {% endif %}
+
+          <button type="button" class="pc-btn pc-fullscreen" data-pc-fullscreen aria-label="Fullscreen">
+            <svg class="pc-fs-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="file-details">
       <span>ID {{ video.id }}</span>
       <span>{{ (video.size_bytes/1024/1024) | round(2) }} MB</span>
@@ -31,22 +76,6 @@
       <span>Кодек: {{ codec_name or "не определён" }}</span>
       <span data-video-duration>Длительность: {{ duration_label }}</span>
       <span data-video-resolution>{% if resolution_label %}Разрешение: {{ resolution_label }}{% else %}Разрешение: ...{% endif %}</span>
-      {% if has_720p %}
-      <span class="quality-selector">
-        Качество:
-        <select data-quality-switch data-video-id="{{ video.id }}">
-          <option value="original" selected>Оригинал</option>
-          <option value="720p">720p</option>
-        </select>
-      </span>
-      {% endif %}
-    </div>
-    <div class="volume-bar">
-      <button type="button" class="volume-toggle" data-volume-toggle title="Mute/Unmute" aria-label="Mute/Unmute">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-      </button>
-      <input type="range" data-volume-slider min="0" max="1" step="0.01" value="1" class="volume-slider" />
-      <span data-volume-label class="volume-label">100%</span>
     </div>
   </section>
 

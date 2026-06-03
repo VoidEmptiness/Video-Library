@@ -144,19 +144,6 @@ def clear_progress(video_id: int):
         pass
 
 
-def read_progress(video_id: int) -> dict:
-    pf = get_progress_file(video_id)
-    if not pf.exists():
-        return {"status": "done", "percent": 100}
-    try:
-        content = pf.read_text().strip().split("\n", 1)
-        percent = float(content[0].strip())
-        status = content[1].strip() if len(content) > 1 else "processing"
-        return {"status": status, "percent": percent}
-    except Exception:
-        return {"status": "unknown", "percent": 0}
-
-
 def transcode_to_h264(
     input_path: Path,
     output_path: Path,

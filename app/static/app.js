@@ -64,6 +64,9 @@ function wireBulkActions() {
   const bulkBar = form?.querySelector("[data-bulk-bar]");
   const count = form?.querySelector("[data-selected-count]");
   const deleteButton = form?.querySelector("[data-delete-selected]");
+  const downloadButton = form?.querySelector("[data-download-selected]");
+  const downloadProgress = form?.querySelector("[data-download-progress]");
+  const downloadProgressLabel = form?.querySelector("[data-download-progress-label]");
   const selectAll = form?.querySelector("[data-select-all]");
   const selectClear = form?.querySelector("[data-select-clear]");
   const checks = Array.from(form?.querySelectorAll("[data-video-select]") || []);
@@ -92,6 +95,7 @@ function wireBulkActions() {
     if (toggle) toggle.textContent = selectMode ? "Готово" : "Выбрать";
     if (count) count.textContent = `${total} выбрано`;
     if (deleteButton) deleteButton.disabled = total === 0;
+    if (downloadButton) downloadButton.disabled = total === 0;
     if (bulkTagsBtn) bulkTagsBtn.disabled = total === 0;
   }
 
@@ -137,6 +141,53 @@ function wireBulkActions() {
     }
     if (!confirm(`Удалить выбранные видео: ${total}?`)) {
       event.preventDefault();
+    }
+  });
+
+  downloadButton?.addEventListener("click", async () => {
+    const ids = checks.filter((c) => c.checked).map((c) => c.value);
+    if (ids.length === 0) return;
+
+    downloadButton.disabled = true;
+    if (bulkTagsBtn) bulkTagsBtn.disabled = true;
+    if (deleteButton) deleteButton.disabled = true;
+    if (selectAll) selectAll.disabled = true;
+    if (selectClear) selectClear.disabled = true;
+    for (const check of checks) check.disabled = true;
+    if (downloadProgress) downloadProgress.hidden = false;
+
+    const formData = new FormData();
+    for (const id of ids) formData.append("video_ids", id);
+
+    try {
+      const resp = await fetch("/videos/download-selected", {
+        method: "POST",
+        body: formData,
+      });
+      if (!resp.ok) {
+        alert("Ошибка при скачивании");
+        return;
+      }
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "videos.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Ошибка при скачивании");
+    } finally {
+      if (downloadProgress) downloadProgress.hidden = true;
+      for (const check of checks) check.disabled = false;
+      if (bulkTagsBtn) bulkTagsBtn.disabled = false;
+      if (deleteButton) deleteButton.disabled = false;
+      if (selectAll) selectAll.disabled = false;
+      if (selectClear) selectClear.disabled = false;
+      syncBulkUi();
     }
   });
 
@@ -614,6 +665,28 @@ function wireVideoPlayerShortcuts() {
       event.preventDefault();
       return;
     }
+
+    if (event.key === " " || event.key === "Space") {
+      event.preventDefault();
+      if (video.paused || video.ended) {
+        video.play().catch(() => {});
+      } else {
+        video.pause();
+      }
+      return;
+    }
+
+    if (event.key === "f" || event.key === "F") {
+      event.preventDefault();
+      const wrapper = document.querySelector("[data-player-wrapper]");
+      if (!wrapper) return;
+      if (!document.fullscreenElement) {
+        wrapper.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+      return;
+    }
   });
 }
 
@@ -695,7 +768,7 @@ function wireVolumeSlider() {
   const slider = document.querySelector("[data-volume-slider]");
   const label = document.querySelector("[data-volume-label]");
   if (!slider || !label) return;
-  if (document.querySelector("video.player")) return;
+  if (document.querySelector(".player-wrapper")) return;
 
   function update() {
     const val = parseFloat(slider.value);
@@ -727,56 +800,184 @@ function applyDefaultVolume() {
   }
 }
 
-function wireCustomVolume() {
+function wireCustomControls() {
+  const wrapper = document.querySelector("[data-player-wrapper]");
   const video = document.querySelector("video.player");
-  if (!video) return;
+  if (!wrapper || !video) return;
 
-  const slider = document.querySelector("[data-volume-slider]");
-  const label = document.querySelector("[data-volume-label]");
-  const toggle = document.querySelector("[data-volume-toggle]");
-  if (!slider) return;
+  const controls = wrapper.querySelector("[data-player-controls]");
+  const playBtn = controls?.querySelector("[data-pc-play]");
+  const timeDisplay = controls?.querySelector("[data-pc-time]");
+  const seekInput = controls?.querySelector("[data-pc-seek-input]");
+  const seekFill = controls?.querySelector("[data-pc-seek-fill]");
+  const seekThumb = controls?.querySelector("[data-pc-seek-thumb]");
+  const seekTrack = controls?.querySelector("[data-pc-seek]");
+  const volSlider = controls?.querySelector("[data-pc-vol-slider]");
+  const volBtn = controls?.querySelector("[data-pc-vol-btn]");
+  const fsBtn = controls?.querySelector("[data-pc-fullscreen]");
 
   let prevVolume = 1;
+  let isSeeking = false;
+function fmt(sec) {
+    return formatDurationLabel(sec);
+  }
 
-  function sync() {
+  function updatePlayIcon() {
+    if (!playBtn) return;
+    const playIcon = playBtn.querySelector(".pc-play-icon");
+    const pauseIcon = playBtn.querySelector(".pc-pause-icon");
+    if (!playIcon || !pauseIcon) return;
+    const paused = video.paused || video.ended;
+    playIcon.style.display = paused ? "" : "none";
+    pauseIcon.style.display = paused ? "none" : "";
+  }
+
+  function updateTime() {
+    if (!timeDisplay) return;
+    const cur = video.currentTime || 0;
+    const dur = video.duration || 0;
+    timeDisplay.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+  }
+
+  function updateSeek() {
+    if (!seekInput || !seekFill || !seekThumb) return;
+    const dur = video.duration;
+    if (!dur || !isFinite(dur)) {
+      seekInput.value = 0;
+      seekFill.style.width = "0%";
+      seekThumb.style.left = "0%";
+      return;
+    }
+    const pct = (video.currentTime / dur) * 1000;
+    seekInput.value = pct;
+    const pctDisplay = (pct / 10).toFixed(2);
+    seekFill.style.width = `${pctDisplay}%`;
+    seekThumb.style.left = `${pctDisplay}%`;
+  }
+
+  function updateVolumeUI() {
+    if (!volSlider) return;
     const vol = video.volume;
     const pct = Math.round(vol * 100);
-    slider.value = vol;
-    slider.style.setProperty("--volume-pct", `${pct}%`);
-    if (label) label.textContent = `${pct}%`;
-    if (toggle) toggle.classList.toggle("muted", vol === 0);
+    volSlider.value = vol;
+    volSlider.style.setProperty("--pc-vol-pct", `${pct}%`);
+    if (!volBtn) return;
+    const high = volBtn.querySelector(".pc-vol-high");
+    const low = volBtn.querySelector(".pc-vol-low");
+    const muted = volBtn.querySelector(".pc-vol-muted");
+    if (!high || !low || !muted) return;
+    high.style.display = "none";
+    low.style.display = "none";
+    muted.style.display = "none";
+    if (vol === 0) {
+      muted.style.display = "";
+    } else if (vol < 0.5) {
+      low.style.display = "";
+    } else {
+      high.style.display = "";
+    }
+  }
+function togglePlay() {
+    if (video.paused || video.ended) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
   }
 
-  slider.addEventListener("input", () => {
-    video.volume = parseFloat(slider.value);
-    sync();
+  playBtn?.addEventListener("click", togglePlay);
+  wrapper.addEventListener("click", (e) => {
+    if (e.target.closest(".player-controls")) return;
+    togglePlay();
+  });
+  video.addEventListener("play", updatePlayIcon);
+  video.addEventListener("pause", updatePlayIcon);
+  video.addEventListener("ended", updatePlayIcon);
+video.addEventListener("timeupdate", () => {
+    updateTime();
+    if (!isSeeking) updateSeek();
   });
 
-  if (toggle) {
-    toggle.addEventListener("click", () => {
-      if (video.volume > 0) {
-        prevVolume = video.volume;
-        video.volume = 0;
-      } else {
-        video.volume = prevVolume;
-      }
-      sync();
-    });
-  }
+  video.addEventListener("durationchange", () => {
+    updateTime();
+    updateSeek();
+  });
 
-  video.addEventListener("volumechange", sync);
+  video.addEventListener("loadedmetadata", () => {
+    updateTime();
+    updateSeek();
+  });
 
-  function onReady() {
-    sync();
+  seekInput?.addEventListener("input", () => {
+    if (!seekInput) return;
+    isSeeking = true;
+    seekTrack?.classList.add("dragging");
+    const dur = video.duration || 1;
+    const pct = parseFloat(seekInput.value) / 10;
+    seekFill.style.width = `${pct}%`;
+    seekThumb.style.left = `${pct}%`;
+    const previewTime = (dur * parseFloat(seekInput.value)) / 1000;
+    if (timeDisplay) {
+      timeDisplay.textContent = `${fmt(previewTime)} / ${fmt(dur)}`;
+    }
+  });
+
+  seekInput?.addEventListener("change", () => {
+    if (!seekInput) return;
+    isSeeking = false;
+    seekTrack?.classList.remove("dragging");
+    const dur = video.duration || 1;
+    video.currentTime = (dur * parseFloat(seekInput.value)) / 1000;
+    updateSeek();
+    updateTime();
+  });
+seekTrack?.addEventListener("click", (e) => {
+    const rect = seekTrack.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, x / rect.width));
+    if (seekInput && isFinite(video.duration)) {
+      seekInput.value = pct * 1000;
+      video.currentTime = pct * video.duration;
+      updateSeek();
+      updateTime();
+    }
+  });
+volSlider?.addEventListener("input", () => {
+    video.volume = parseFloat(volSlider.value);
+  });
+
+  volBtn?.addEventListener("click", () => {
+    if (video.volume > 0) {
+      prevVolume = video.volume;
+      video.volume = 0;
+    } else {
+      video.volume = prevVolume;
+    }
+  });
+
+  video.addEventListener("volumechange", updateVolumeUI);
+
+  function onVolReady() {
+    updateVolumeUI();
   }
 
   if (video.readyState >= 1) {
-    onReady();
+    onVolReady();
   } else {
-    video.addEventListener("loadedmetadata", onReady, { once: true });
+    video.addEventListener("loadedmetadata", onVolReady, { once: true });
   }
+fsBtn?.addEventListener("click", () => {
+    if (!document.fullscreenElement) {
+      wrapper.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  });
 
-  document.addEventListener("keydown", (event) => {
+  document.addEventListener("fullscreenchange", () => {
+    wrapper.classList.toggle("fullscreen", !!document.fullscreenElement);
+  });
+document.addEventListener("keydown", (event) => {
     if (isTypingTarget(event.target)) return;
     if (event.altKey || event.metaKey || event.ctrlKey) return;
     if (document.querySelector("video.player") !== video) return;
@@ -784,16 +985,28 @@ function wireCustomVolume() {
     if (event.key === "ArrowUp") {
       event.preventDefault();
       video.volume = Math.min(1, video.volume + 0.1);
-      sync();
       return;
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       video.volume = Math.max(0, video.volume - 0.1);
-      sync();
       return;
     }
   });
+video.addEventListener("pause", () => {
+    controls?.classList.add("force-visible");
+  });
+
+  video.addEventListener("play", () => {
+    controls?.classList.remove("force-visible");
+  });
+
+  if (video.paused) {
+    controls?.classList.add("force-visible");
+  }
+updatePlayIcon();
+  updateTime();
+  updateSeek();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -810,5 +1023,5 @@ document.addEventListener("DOMContentLoaded", () => {
   wireQualitySwitch();
   wireVolumeSlider();
   applyDefaultVolume();
-  wireCustomVolume();
+  wireCustomControls();
 });

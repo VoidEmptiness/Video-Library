@@ -97,5 +97,4 @@ class Folder(Base):
     children: Mapped[list[Folder]] = relationship(
         "Folder",
         back_populates="parent",
-        cascade="all, delete-orphan",
     )

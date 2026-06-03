@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import json
 import subprocess
 import time
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -15,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, contains_eager, joinedload
 
 from .database import SessionLocal, engine, get_db
 from .models import Base, Folder, Tag, Video
@@ -83,7 +85,7 @@ def _migrate_db() -> None:
         for ix_name in indexes:
             if ix_name and "name" in ix_name.lower():
                 with engine.connect() as conn:
-                    conn.execute(text("DROP INDEX IF EXISTS \"%s\"" % ix_name))
+                    conn.execute(text(f"DROP INDEX IF EXISTS \"{ix_name}\""))
                     conn.commit()
                 break
     except Exception:
@@ -319,11 +321,13 @@ def _tag_ids_from_csv(csv: str | None) -> set[int]:
 
 
 def _video_query(db: Session, tag_ids: set[int] | None = None, q: str | None = None, untagged: bool = False):
-    stmt = select(Video).options(joinedload(Video.tags)).order_by(Video.created_at.desc())
+    stmt = select(Video).order_by(Video.created_at.desc())
     if untagged:
-        stmt = stmt.where(~Video.tags.any())
+        stmt = stmt.where(~Video.tags.any()).options(joinedload(Video.tags))
     elif tag_ids:
-        stmt = stmt.join(Video.tags).where(Tag.id.in_(tag_ids)).group_by(Video.id)
+        stmt = stmt.join(Video.tags).where(Tag.id.in_(tag_ids)).group_by(Video.id).options(contains_eager(Video.tags))
+    else:
+        stmt = stmt.options(joinedload(Video.tags))
     if q:
         q = q.strip()
         if q:
@@ -710,6 +714,33 @@ def delete_selected_videos(
     return _redirect(_safe_return_to(return_to))
 
 
+@app.post("/videos/download-selected")
+def download_selected_videos(
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+    video_ids: Annotated[list[int] | None, Form()] = None,
+):
+    if not video_ids:
+        raise HTTPException(status_code=400, detail="No videos selected")
+
+    videos = list(db.scalars(select(Video).where(Video.id.in_(video_ids))))
+    if not videos:
+        raise HTTPException(status_code=404, detail="Videos not found")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for video in videos:
+            path = video_path(video.filename)
+            if path.exists():
+                zf.write(str(path), video.original_name)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="videos.zip"'},
+    )
+
+
 @app.post("/videos/{video_id}/tags")
 def set_video_tags(
     video_id: int,
@@ -866,7 +897,7 @@ def folders_page(
         db.execute(
             select(Folder)
             .options(joinedload(Folder.tags), joinedload(Folder.parent))
-            .order_by(Folder.parent_id.nullslast(), Folder.name)
+            .order_by(Folder.parent_id.is_(None), Folder.parent_id, Folder.name)
         )
         .unique()
         .scalars()
@@ -895,24 +926,15 @@ def folder_create(
     name = name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Empty name")
-    if parent_id and not db.get(Folder, parent_id):
+    if parent_id is not None and parent_id > 0 and not db.get(Folder, parent_id):
         parent_id = None
-    from sqlalchemy.exc import IntegrityError
-    
-    base_name = name
-    attempt = 1
-    while True:
-        try:
-            folder = Folder(name=name, parent_id=parent_id, match_all=bool(match_all))
-            if tag_ids:
-                folder.tags = list(db.scalars(select(Tag).where(Tag.id.in_(tag_ids)).order_by(Tag.name)))
-            db.add(folder)
-            db.commit()
-            break
-        except IntegrityError:
-            db.rollback()
-            attempt += 1
-            name = f"{base_name} ({attempt})"
+    elif parent_id is not None and parent_id <= 0:
+        parent_id = None
+    folder = Folder(name=name, parent_id=parent_id, match_all=bool(match_all))
+    if tag_ids:
+        folder.tags = list(db.scalars(select(Tag).where(Tag.id.in_(tag_ids)).order_by(Tag.name)))
+    db.add(folder)
+    db.commit()
     
     if parent_id:
         return _redirect(f"/folders/{parent_id}")
@@ -963,7 +985,7 @@ def folder_edit(
         raise HTTPException(status_code=404, detail="Folder not found")
     folder.name = name.strip() or folder.name
     folder.match_all = bool(match_all)
-    if parent_id and parent_id != folder.id and db.get(Folder, parent_id) and not _would_create_cycle(db, folder.id, parent_id):
+    if parent_id is not None and parent_id > 0 and parent_id != folder.id and db.get(Folder, parent_id) and not _would_create_cycle(db, folder.id, parent_id):
         folder.parent_id = parent_id
     else:
         folder.parent_id = None

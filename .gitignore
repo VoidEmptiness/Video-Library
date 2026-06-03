@@ -25,6 +25,12 @@ Thumbs.db
 
 # Transcoding progress files
 transcode_progress/
+app/transcode_progress/
 
 # Project specific
 /data/
+app/data/
+
+# Python
+*.log
+.python-version
