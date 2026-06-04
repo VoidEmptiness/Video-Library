@@ -1091,3 +1091,28 @@ def settings_save(
     save_settings(settings)
     return RedirectResponse(url="/settings", status_code=303)
 
+
+@app.post("/settings/reset-thumbnails")
+def reset_thumbnails(
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+    _: UserHTML,
+):
+    videos = db.query(Video).all()
+    thumb_pairs: list[tuple[int, Path]] = []
+    for video in videos:
+        old_thumb = Path(video.thumbnail_path) if video.thumbnail_path else THUMB_DIR / f"{video.id}.jpg"
+        if old_thumb.exists():
+            try:
+                old_thumb.unlink()
+            except Exception:
+                pass
+        video.thumbnail_path = None
+        src = video_path(video.filename)
+        if src.exists():
+            thumb_pairs.append((video.id, src))
+    db.commit()
+    if thumb_pairs:
+        background_tasks.add_task(_generate_all_thumbnails, thumb_pairs)
+    return RedirectResponse(url="/settings", status_code=303)
+
