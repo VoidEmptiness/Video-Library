@@ -17,10 +17,10 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, contains_eager, joinedload
+from sqlalchemy.orm import Session, joinedload
 
 from .database import SessionLocal, engine, get_db
-from .models import Base, Folder, Tag, Video
+from .models import Base, Folder, Tag, Video, VideoTag
 from .services.auth import SESSION_COOKIE, create_session_token, parse_session_token, session_expiry_dt, verify_credentials
 from .services.storage import THUMB_DIR, VIDEO_DIR, ensure_dirs, unique_storage_name, video_path
 from .services.thumbnails import generate_thumbnail
@@ -325,7 +325,8 @@ def _video_query(db: Session, tag_ids: set[int] | None = None, q: str | None = N
     if untagged:
         stmt = stmt.where(~Video.tags.any()).options(joinedload(Video.tags))
     elif tag_ids:
-        stmt = stmt.join(Video.tags).where(Tag.id.in_(tag_ids)).group_by(Video.id).options(contains_eager(Video.tags))
+        subq = select(VideoTag.video_id).where(VideoTag.tag_id.in_(tag_ids)).group_by(VideoTag.video_id).subquery()
+        stmt = stmt.where(Video.id.in_(subq)).options(joinedload(Video.tags))
     else:
         stmt = stmt.options(joinedload(Video.tags))
     if q:
@@ -1017,16 +1018,20 @@ def _folder_videos(db: Session, folder: Folder):
     if not tag_ids:
         return []
 
+    matching_ids_q = (
+        select(VideoTag.video_id)
+        .where(VideoTag.tag_id.in_(tag_ids))
+        .group_by(VideoTag.video_id)
+    )
+    if folder.match_all:
+        matching_ids_q = matching_ids_q.having(func.count(func.distinct(VideoTag.tag_id)) == len(tag_ids))
+
     stmt = (
         select(Video)
-        .join(Video.tags)
-        .where(Tag.id.in_(tag_ids))
-        .group_by(Video.id)
+        .where(Video.id.in_(matching_ids_q.subquery()))
         .options(joinedload(Video.tags))
         .order_by(Video.created_at.desc())
     )
-    if folder.match_all:
-        stmt = stmt.having(func.count(func.distinct(Tag.id)) == len(tag_ids))
     return list(db.execute(stmt).unique().scalars())
 
 
