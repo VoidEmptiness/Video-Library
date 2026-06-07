@@ -11,7 +11,8 @@
     </div>
   </section>
 
-  <section class="workspace-grid">
+  <section class="workspace-grid{% if user == 'guest' %} workspace-grid--guest{% endif %}">
+    {% if user != "guest" %}
     <article class="panel upload-panel">
       <div class="panel-title">
         <h2>Загрузка</h2>
@@ -39,6 +40,7 @@
         <p id="uploadStatus" class="status"></p>
       </div>
     </article>
+    {% endif %}
 
     <article class="panel">
       <div class="panel-title">
@@ -81,7 +83,7 @@
       <h2>{% if untagged_filter %}Видео без тегов{% else %}Все видео{% endif %}</h2>
       <div class="selection-actions">
         <span>{{ videos | length }}</span>
-        {% if videos|length > 0 %}
+        {% if videos|length > 0 and user != "guest" %}
           <button class="button secondary compact" type="button" data-select-toggle>Выбрать</button>
         {% endif %}
       </div>

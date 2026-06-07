@@ -49,5 +49,12 @@ def parse_session_token(token: str) -> str | None:
         return None
 
 
+GUEST_USER = "guest"
+
+
+def is_guest(user: str | None) -> bool:
+    return user == GUEST_USER
+
+
 def session_expiry_dt() -> datetime:
     return datetime.now(tz=timezone.utc) + timedelta(seconds=_max_age_seconds())

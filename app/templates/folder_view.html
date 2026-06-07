@@ -24,6 +24,7 @@
       <h2>Вложенные папки</h2>
       <span>{{ folder.children|length }}</span>
     </div>
+    {% if user != "guest" %}
     <details class="edit-box edit-box-condensed">
       <summary class="button secondary compact">+ Создать вложенную папку</summary>
       <form method="post" action="/folders/create" class="form-stack">
@@ -55,6 +56,7 @@
         <button class="button" type="submit">Создать</button>
       </form>
     </details>
+    {% endif %}
     {% if folder.children|length > 0 %}
       <div class="folder-list">
         {% for child in folder.children %}

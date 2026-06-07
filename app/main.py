@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .database import SessionLocal, engine, get_db
 from .models import Base, Folder, Tag, Video, VideoTag
-from .services.auth import SESSION_COOKIE, create_session_token, parse_session_token, session_expiry_dt, verify_credentials
+from .services.auth import GUEST_USER, SESSION_COOKIE, create_session_token, is_guest, parse_session_token, session_expiry_dt, verify_credentials
 from .services.storage import THUMB_DIR, VIDEO_DIR, ensure_dirs, unique_storage_name, video_path
 from .services.thumbnails import generate_thumbnail
 from .services.settings import get_setting, load_settings, save_settings
@@ -128,6 +128,24 @@ def require_user_html(request: Request) -> str | None:
 
 User = Annotated[str | None, Depends(require_user)]
 UserHTML = Annotated[str | None, Depends(require_user_html)]
+
+
+def require_admin(request: Request) -> str | None:
+    user = require_user(request)
+    if is_guest(user):
+        raise HTTPException(status_code=403, detail="Admins only")
+    return user
+
+
+def require_admin_html(request: Request) -> str | None:
+    user = require_user_html(request)
+    if is_guest(user):
+        raise HTTPException(status_code=403, detail="Admins only")
+    return user
+
+
+AdminUser = Annotated[str | None, Depends(require_admin)]
+AdminUserHTML = Annotated[str | None, Depends(require_admin_html)]
 
 
 def _redirect(url: str) -> RedirectResponse:
@@ -301,6 +319,22 @@ def logout():
     return resp
 
 
+@app.post("/guest-login")
+def guest_login():
+    if not _wants_auth():
+        return _redirect("/")
+    token = create_session_token(GUEST_USER)
+    resp = _redirect("/")
+    resp.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        expires=session_expiry_dt(),
+    )
+    return resp
+
+
 def _all_tags(db: Session) -> list[Tag]:
     return list(db.scalars(select(Tag).order_by(Tag.name)))
 
@@ -340,7 +374,7 @@ def _video_query(db: Session, tag_ids: set[int] | None = None, q: str | None = N
 def index(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    user: UserHTML,
     tags: str | None = None,
     q: str | None = None,
     untagged: bool = False,
@@ -352,6 +386,7 @@ def index(
         {
             "request": request,
             "title": APP_TITLE,
+            "user": user,
             "videos": videos,
             "all_tags": _all_tags(db),
             "selected_tag_ids": tag_ids,
@@ -427,7 +462,7 @@ async def _generate_all_thumbnails(pairs: list[tuple[int, Path]]) -> None:
 async def upload_video(
     background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     files: list[UploadFile] = File(...),
 ):
     if not files:
@@ -494,7 +529,7 @@ def video_page(
     request: Request,
     video_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    user: UserHTML,
 ):
     video = db.get(Video, video_id)
     if not video:
@@ -505,11 +540,14 @@ def video_page(
     codec_display = {"hevc": "H.265", "h264": "H.264", "h265": "H.265"}.get(codec_name, codec_name) if codec_name else None
     has_720p = bool(video.filename_720p) and video_path(video.filename_720p).exists()
     default_volume = get_setting("default_volume", 1.0)
+    if is_guest(user):
+        default_volume = 0.01
     return templates.TemplateResponse(
         "video.html",
         {
             "request": request,
             "title": f"{APP_TITLE} — {video.original_name}",
+            "user": user,
             "video": video,
             "all_tags": _all_tags(db),
             "codec_name": codec_display,
@@ -590,7 +628,7 @@ def media_stream(
 def video_download(
     video_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: User,
+    _: AdminUser,
 ):
     video = db.get(Video, video_id)
     if not video:
@@ -609,7 +647,7 @@ def video_download(
 def video_download_720p(
     video_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: User,
+    _: AdminUser,
 ):
     video = db.get(Video, video_id)
     if not video:
@@ -648,7 +686,7 @@ def thumb_get(
 def delete_video(
     video_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
 ):
     video = db.get(Video, video_id)
     if not video:
@@ -662,7 +700,7 @@ def delete_video(
 @app.post("/videos/tags-bulk")
 def tags_bulk(
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     video_ids: Annotated[list[int] | None, Form()] = None,
     tag_ids: Annotated[list[int] | None, Form()] = None,
     return_to: Annotated[str | None, Form()] = None,
@@ -698,7 +736,7 @@ def tags_bulk(
 @app.post("/videos/delete-selected")
 def delete_selected_videos(
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     video_ids: Annotated[list[int] | None, Form()] = None,
     return_to: Annotated[str | None, Form()] = None,
 ):
@@ -718,7 +756,7 @@ def delete_selected_videos(
 @app.post("/videos/download-selected")
 def download_selected_videos(
     db: Annotated[Session, Depends(get_db)],
-    _: User,
+    _: AdminUser,
     video_ids: Annotated[list[int] | None, Form()] = None,
 ):
     if not video_ids:
@@ -746,7 +784,7 @@ def download_selected_videos(
 def set_video_tags(
     video_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     tag_ids: Annotated[list[int] | None, Form()] = None,
     return_to: Annotated[str | None, Form()] = None,
 ):
@@ -769,7 +807,7 @@ def upload_tags_page(
     request: Request,
     ids: str,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
 ):
     id_list: list[int] = []
     for part in (ids or "").split(","):
@@ -811,7 +849,7 @@ def upload_tags_page(
 def tags_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
 ):
     tags = list(db.scalars(select(Tag).order_by(Tag.name)))
     return templates.TemplateResponse(
@@ -824,7 +862,7 @@ def tags_page(
 def tag_create(
     name: Annotated[str, Form()],
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     description: Annotated[str | None, Form()] = None,
 ):
     name = name.strip()
@@ -843,7 +881,7 @@ def tag_create(
 def tag_edit(
     tag_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     name: Annotated[str, Form()],
     description: Annotated[str | None, Form()] = None,
 ):
@@ -863,7 +901,7 @@ def tag_edit(
 def tag_delete(
     tag_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
 ):
     tag = db.get(Tag, tag_id)
     if not tag:
@@ -876,7 +914,7 @@ def tag_delete(
 @app.post("/tags/delete-selected")
 def tag_delete_selected(
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     tag_ids: Annotated[list[int] | None, Form()] = None,
 ):
     if not tag_ids:
@@ -892,7 +930,7 @@ def tag_delete_selected(
 def folders_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
 ):
     folders = list(
         db.execute(
@@ -918,7 +956,7 @@ def folders_page(
 @app.post("/folders/create")
 def folder_create(
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     name: Annotated[str, Form()],
     parent_id: Annotated[int | None, Form()] = None,
     match_all: Annotated[str | None, Form()] = None,
@@ -946,7 +984,7 @@ def folder_create(
 def folder_delete(
     folder_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
 ):
     folder = db.get(Folder, folder_id)
     if not folder:
@@ -959,7 +997,7 @@ def folder_delete(
 @app.post("/folders/delete-selected")
 def folder_delete_selected(
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     folder_ids: Annotated[list[int] | None, Form()] = None,
 ):
     if not folder_ids:
@@ -975,7 +1013,7 @@ def folder_delete_selected(
 def folder_edit(
     folder_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
     name: Annotated[str, Form()],
     parent_id: Annotated[int | None, Form()] = None,
     match_all: Annotated[str | None, Form()] = None,
@@ -1040,7 +1078,7 @@ def folder_view(
     request: Request,
     folder_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    user: UserHTML,
 ):
     folder = db.get(Folder, folder_id)
     if not folder:
@@ -1060,6 +1098,7 @@ def folder_view(
         {
             "request": request,
             "title": f"{APP_TITLE} — {folder.name}",
+            "user": user,
             "folder": folder,
             "videos": videos,
             "all_tags": _all_tags(db),
@@ -1070,7 +1109,7 @@ def folder_view(
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(
     request: Request,
-    _: UserHTML,
+    _: AdminUserHTML,
 ):
     settings = load_settings()
     return templates.TemplateResponse(
@@ -1086,7 +1125,7 @@ def settings_page(
 
 @app.post("/settings")
 def settings_save(
-    _: UserHTML,
+    _: AdminUserHTML,
     transcode_to_720p: Annotated[str | None, Form()] = None,
     default_volume: Annotated[float | None, Form()] = None,
 ):
@@ -1101,7 +1140,7 @@ def settings_save(
 def reset_thumbnails(
     background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
-    _: UserHTML,
+    _: AdminUserHTML,
 ):
     videos = db.query(Video).all()
     thumb_pairs: list[tuple[int, Path]] = []

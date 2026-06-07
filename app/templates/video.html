@@ -6,6 +6,7 @@
       <h1 title="{{ video.original_name }}">{{ video.original_name|short_name }}<span class="transcode-icon-inline transcode-icon-video" data-transcode-indicator="{{ video.id }}" hidden>⚙</span></h1>
     </div>
     <div class="page-actions">
+      {% if user != "guest" %}
       <a href="/download/{{ video.id }}" class="button secondary" download>Скачать</a>
       {% if has_720p %}
       <a href="/download/720p/{{ video.id }}" class="button secondary" download>Скачать 720p</a>
@@ -13,6 +14,7 @@
       <form method="post" action="/videos/{{ video.id }}/delete" onsubmit="return confirm('Удалить видео?');">
         <button class="button danger" type="submit">Удалить</button>
       </form>
+      {% endif %}
     </div>
   </section>
 
@@ -79,6 +81,7 @@
     </div>
   </section>
 
+  {% if user != "guest" %}
   <section class="panel">
     <div class="panel-title">
       <h2>Теги видео</h2>
@@ -107,4 +110,5 @@
       <button class="button" type="submit">Сохранить теги</button>
     </form>
   </section>
+  {% endif %}
 {% endblock %}

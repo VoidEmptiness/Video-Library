@@ -269,6 +269,13 @@ html[data-theme="dark"] .brand-mark {
   margin-bottom: 24px;
 }
 
+.workspace-grid--guest {
+  grid-template-columns: 1fr;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .panel,
 .section-block,
 .player-shell,
@@ -1601,4 +1608,21 @@ html[data-theme="dark"] .video-card:hover {
   background: var(--surface-soft);
   color: var(--muted);
   border: 1px solid var(--line);
+}
+
+.guest-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.auth-divider {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 1.25rem 0;
 }

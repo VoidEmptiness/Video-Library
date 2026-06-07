@@ -33,12 +33,17 @@
 
     <nav class="nav" aria-label="Основная навигация">
       <a class="{% if path == '/' or path.startswith('/videos') or path.startswith('/upload') %}active{% endif %}" href="/">Видео</a>
+      {% if user != "guest" %}
       <a class="{% if path.startswith('/tags') %}active{% endif %}" href="/tags">Теги</a>
       <a class="{% if path.startswith('/folders') %}active{% endif %}" href="/folders">Папки</a>
       <a class="{% if path.startswith('/settings') %}active{% endif %}" href="/settings">Настройки</a>
+      {% endif %}
     </nav>
 
     <div class="topbar-actions">
+      {% if user == "guest" %}
+        <span class="guest-badge">Гость</span>
+      {% endif %}
       <div class="theme-switch" role="group" aria-label="Выбор темы">
         <button class="theme-icon-button" type="button" data-theme-set="light" aria-label="Светлая тема" title="Светлая тема" aria-pressed="false">
           <span aria-hidden="true">☀</span>
