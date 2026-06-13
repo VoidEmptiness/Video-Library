@@ -11,7 +11,7 @@
   </section>
 
   <section class="panel">
-    <form method="post" action="/tags/create" class="create-row">
+    <form method="post" action="/tags/create" class="create-row" novalidate data-custom-validate>
       <label class="field grow">
         <span>Новый тег</span>
         <input name="name" placeholder="Например: family" required />
@@ -31,7 +31,7 @@
         <p>Создайте теги, чтобы быстрее фильтровать видео и собирать виртуальные папки.</p>
       </div>
     {% else %}
-      <form method="post" action="/tags/delete-selected" onsubmit="return confirm('Удалить выбранные теги?');">
+      <form method="post" action="/tags/delete-selected" data-confirm="Удалить выбранные теги?">
         <div class="selection-actions">
           <button class="button secondary compact" type="button" data-simple-select-toggle>Выбрать</button>
         </div>

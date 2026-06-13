@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+import tempfile
 from pathlib import Path
 
 
-_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "data"
+_SETTINGS_DIR = Path(os.getenv("SETTINGS_DIR", str(Path(__file__).resolve().parent.parent / "data")))
 _SETTINGS_FILE = _SETTINGS_DIR / "settings.json"
 
 _DEFAULT_SETTINGS = {
@@ -35,7 +38,23 @@ def save_settings(settings: dict) -> None:
     merged = dict(_DEFAULT_SETTINGS)
     if isinstance(settings, dict):
         merged.update(settings)
-    _SETTINGS_FILE.write_text(json.dumps(merged, indent=2, ensure_ascii=False), "utf-8")
+    data = json.dumps(merged, indent=2, ensure_ascii=False)
+    tmp = tempfile.NamedTemporaryFile(dir=str(_SETTINGS_DIR), suffix=".tmp", delete=False, mode="w", encoding="utf-8")
+    try:
+        fcntl.flock(tmp.fileno(), fcntl.LOCK_EX)
+        tmp.write(data)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        fcntl.flock(tmp.fileno(), fcntl.LOCK_UN)
+        tmp.close()
+        os.replace(tmp.name, str(_SETTINGS_FILE))
+    except Exception:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+        tmp.close()
+        raise
 
 
 def get_setting(key: str, default=None):

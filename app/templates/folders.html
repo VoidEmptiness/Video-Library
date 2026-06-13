@@ -16,7 +16,7 @@
       <p>Папка сама собирает видео по выбранным тегам.</p>
     </div>
 
-    <form method="post" action="/folders/create" class="form-stack">
+    <form method="post" action="/folders/create" class="form-stack" novalidate data-custom-validate>
       <div class="form-grid">
         <label class="field">
           <span>Название</span>
@@ -54,7 +54,7 @@
         <p>Создайте папку из тегов, чтобы получать готовые подборки без ручной сортировки файлов.</p>
       </div>
     {% else %}
-      <form id="bulkFolderDeleteForm" method="post" action="/folders/delete-selected" onsubmit="return confirm('Удалить выбранные папки?');">
+      <form id="bulkFolderDeleteForm" method="post" action="/folders/delete-selected" data-confirm="Удалить выбранные папки?">
         <div class="selection-actions">
           <button class="button secondary compact" type="button" data-simple-select-toggle>Выбрать</button>
         </div>

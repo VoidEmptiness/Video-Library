@@ -11,7 +11,7 @@
       {% if has_720p %}
       <a href="/download/720p/{{ video.id }}" class="button secondary" download>Скачать 720p</a>
       {% endif %}
-      <form method="post" action="/videos/{{ video.id }}/delete" onsubmit="return confirm('Удалить видео?');">
+      <form method="post" action="/videos/{{ video.id }}/delete" data-confirm="Удалить видео?">
         <button class="button danger" type="submit">Удалить</button>
       </form>
       {% endif %}

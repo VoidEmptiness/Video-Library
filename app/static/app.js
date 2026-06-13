@@ -133,14 +133,17 @@ function wireBulkActions() {
     syncBulkUi();
   });
 
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     const total = selectedCount();
     if (total === 0) {
       event.preventDefault();
       return;
     }
-    if (!confirm(`Удалить выбранные видео: ${total}?`)) {
-      event.preventDefault();
+    event.preventDefault();
+    const ok = await showConfirm(`Удалить выбранные видео: ${total}?`);
+    if (ok) {
+      form.removeAttribute("data-confirm");
+      form.submit();
     }
   });
 
@@ -165,7 +168,7 @@ function wireBulkActions() {
         body: formData,
       });
       if (!resp.ok) {
-        alert("Ошибка при скачивании");
+        showAlert("Ошибка при скачивании");
         return;
       }
 
@@ -179,7 +182,7 @@ function wireBulkActions() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch {
-      alert("Ошибка при скачивании");
+      showAlert("Ошибка при скачивании");
     } finally {
       if (downloadProgress) downloadProgress.hidden = true;
       for (const check of checks) check.disabled = false;
@@ -432,7 +435,7 @@ function wireDropzone() {
     try {
       await uploadFiles(files);
     } catch (error) {
-      alert(`Ошибка загрузки: ${error}`);
+      showAlert(`Ошибка загрузки: ${error}`);
     }
   });
 
@@ -440,7 +443,10 @@ function wireDropzone() {
     event.preventDefault();
 
     const files = input.files;
-    if (!files || files.length === 0) return;
+    if (!files || files.length === 0) {
+      showAlert("Сначала выберите файлы");
+      return;
+    }
 
     try {
       await uploadFiles(files);
@@ -451,7 +457,7 @@ function wireDropzone() {
         form.submit();
         return;
       }
-      alert(`Ошибка загрузки: ${error}`);
+      showAlert(`Ошибка загрузки: ${error}`);
     }
   });
 }
@@ -1013,6 +1019,153 @@ updatePlayIcon();
   updateSeek();
 }
 
+function showAlert(message) {
+  return showDialog(message, { type: "alert" });
+}
+
+function showConfirm(message) {
+  return showDialog(message, { type: "confirm" });
+}
+
+function showPrompt(message, defaultValue) {
+  return showDialog(message, { type: "prompt", defaultValue });
+}
+
+function showDialog(message, opts = {}) {
+  const overlay = document.getElementById("dialog");
+  const titleEl = document.getElementById("dialog-title");
+  const msgEl = document.getElementById("dialog-message");
+  const inputWrap = document.getElementById("dialog-input-wrap");
+  const inputEl = document.getElementById("dialog-input");
+  const actionsEl = document.getElementById("dialog-actions");
+  if (!overlay || !msgEl || !actionsEl) return Promise.resolve();
+
+  overlay.hidden = false;
+  msgEl.textContent = message;
+
+  titleEl.textContent = "";
+  if (opts.type === "confirm") titleEl.textContent = "Подтверждение";
+  else if (opts.type === "prompt") titleEl.textContent = "Ввод";
+
+  inputWrap.hidden = opts.type !== "prompt";
+  if (opts.type === "prompt") {
+    inputEl.value = opts.defaultValue || "";
+  }
+
+  return new Promise((resolve) => {
+    actionsEl.innerHTML = "";
+
+    function close(result) {
+      overlay.hidden = true;
+      resolve(result);
+    }
+
+    function onKeydown(e) {
+      if (e.key === "Escape") {
+        cleanup();
+        if (opts.type === "confirm") close(false);
+        else close(null);
+      }
+      if (e.key === "Enter" && opts.type === "prompt") {
+        cleanup();
+        close(inputEl.value);
+      }
+    }
+
+    function onOverlayClick(e) {
+      if (e.target === overlay) {
+        cleanup();
+        if (opts.type === "confirm") close(false);
+        else close(null);
+      }
+    }
+
+    function cleanup() {
+      overlay.removeEventListener("click", onOverlayClick);
+      document.removeEventListener("keydown", onKeydown);
+    }
+
+    overlay.addEventListener("click", onOverlayClick);
+    document.addEventListener("keydown", onKeydown);
+
+    if (opts.type === "alert") {
+      const btn = document.createElement("button");
+      btn.className = "button";
+      btn.textContent = "OK";
+      btn.addEventListener("click", () => { cleanup(); close(null); });
+      actionsEl.appendChild(btn);
+      setTimeout(() => btn.focus(), 50);
+    } else if (opts.type === "confirm") {
+      const okBtn = document.createElement("button");
+      okBtn.className = "button";
+      okBtn.textContent = "Да";
+      okBtn.addEventListener("click", () => { cleanup(); close(true); });
+      actionsEl.appendChild(okBtn);
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "button secondary";
+      cancelBtn.textContent = "Нет";
+      cancelBtn.addEventListener("click", () => { cleanup(); close(false); });
+      actionsEl.appendChild(cancelBtn);
+      setTimeout(() => cancelBtn.focus(), 50);
+    } else if (opts.type === "prompt") {
+      const okBtn = document.createElement("button");
+      okBtn.className = "button";
+      okBtn.textContent = "OK";
+      okBtn.addEventListener("click", () => { cleanup(); close(inputEl.value); });
+      actionsEl.appendChild(okBtn);
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "button secondary";
+      cancelBtn.textContent = "Отмена";
+      cancelBtn.addEventListener("click", () => { cleanup(); close(null); });
+      actionsEl.appendChild(cancelBtn);
+      setTimeout(() => inputEl.focus(), 50);
+      inputEl.select();
+    }
+  });
+}
+
+function wireDialogConfirms() {
+  document.addEventListener("submit", function (e) {
+    const form = e.target;
+    const msg = form.getAttribute("data-confirm");
+    if (!msg) return;
+    e.preventDefault();
+    showConfirm(msg).then((ok) => {
+      if (ok) {
+        form.removeAttribute("data-confirm");
+        form.submit();
+        form.setAttribute("data-confirm", msg);
+      }
+    });
+  });
+
+  document.addEventListener("click", function (e) {
+    const el = e.target.closest("[data-confirm]");
+    if (!el) return;
+    if (e.defaultPrevented) return;
+    if (el.tagName === "FORM") return;
+    const msg = el.getAttribute("data-confirm");
+    if (!msg) return;
+    e.preventDefault();
+    e.stopPropagation();
+    showConfirm(msg).then((ok) => {
+      if (ok) {
+        const tag = (el.tagName || "").toLowerCase();
+        if (tag === "button" || tag === "input") {
+          const form = el.closest("form");
+          if (form) {
+            form.submit();
+          }
+        } else {
+          el.click();
+        }
+      }
+    });
+  });
+}
+
 function showToast(message) {
   const el = document.getElementById("toast");
   if (!el) return;
@@ -1052,6 +1205,24 @@ function wireFilePicker() {
   });
 }
 
+function wireCustomValidation() {
+  document.addEventListener("submit", function (event) {
+    const form = event.target;
+    if (!form.hasAttribute("data-custom-validate")) return;
+
+    const inputs = form.querySelectorAll("input[required], textarea[required]");
+    for (const input of inputs) {
+      if (!input.value.trim()) {
+        event.preventDefault();
+        const label = input.closest(".field")?.querySelector("span")?.textContent || "Это поле";
+        showAlert(`Заполните "${label}"`);
+        input.focus();
+        return;
+      }
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireSearchForm();
   wireUntaggedFilter();
@@ -1069,4 +1240,6 @@ document.addEventListener("DOMContentLoaded", () => {
   wireCustomControls();
   wireToast();
   wireFilePicker();
+  wireDialogConfirms();
+  wireCustomValidation();
 });

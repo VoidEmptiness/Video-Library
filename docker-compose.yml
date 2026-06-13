@@ -18,6 +18,7 @@ services:
       THUMBNAIL_TIMEOUT_SECONDS: "30"
       MAX_FILES_PER_UPLOAD: "100"
       THUMBNAIL_CONCURRENCY: "4"
+      SETTINGS_DIR: "/data"
     volumes:
       - videodata:/data
 

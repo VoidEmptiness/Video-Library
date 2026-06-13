@@ -67,7 +67,7 @@
         <p>Перегенерировать превью для всех видео. Текущие превью будут удалены и созданы заново.</p>
       </div>
       <div class="toolbar">
-        <button class="button danger" type="submit" onclick="return confirm('Сбросить все превью? Это удалит текущие превью и создаст новые.')">Сбросить все превью</button>
+        <button class="button danger" type="submit" data-confirm="Сбросить все превью? Это удалит текущие превью и создаст новые.">Сбросить все превью</button>
       </div>
     </section>
   </form>
@@ -94,7 +94,7 @@
           <button type="button" class="button secondary" data-file-picker-btn>Выбрать файл</button>
           <span class="file-picker-name" data-file-picker-name>Файл не выбран</span>
         </div>
-        <button class="button" type="submit" onclick="return confirm('Импортировать видео из ZIP? Существующие видео с таким же filename будут пропущены.')">Импортировать</button>
+        <button class="button" type="submit" data-confirm="Импортировать видео из ZIP? Существующие видео с таким же filename будут пропущены.">Импортировать</button>
       </div>
     </section>
   </form>

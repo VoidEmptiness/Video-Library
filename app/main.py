@@ -14,6 +14,7 @@ from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from pathlib import PurePath
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -85,7 +86,7 @@ def _migrate_db() -> None:
         for ix_name in indexes:
             if ix_name and "name" in ix_name.lower():
                 with engine.connect() as conn:
-                    conn.execute(text("DROP INDEX IF EXISTS \"%s\"" % ix_name.replace("\"", "\"\"")))
+                    conn.execute(text('DROP INDEX IF EXISTS "%s"' % ix_name.replace('"', '""')))
                     conn.commit()
                 break
     except Exception:
@@ -437,25 +438,28 @@ def _do_transcode(video_id: int, original_path: Path) -> None:
 async def _generate_all_thumbnails(pairs: list[tuple[int, Path]]) -> None:
     sem = asyncio.Semaphore(THUMBNAIL_CONCURRENCY)
 
-    async def _one(video_id: int, src: Path) -> None:
+    async def _one(video_id: int, src: Path) -> Path | None:
         async with sem:
             thumb = THUMB_DIR / f"{video_id}.jpg"
             ok = await asyncio.to_thread(generate_thumbnail, src, thumb)
-            if not ok:
-                return
-            db = SessionLocal()
-            try:
-                video = db.get(Video, video_id)
-                if video:
-                    video.thumbnail_path = str(thumb)
-                    db.add(video)
-                    db.commit()
-            except Exception:
-                logger.exception("Failed to save thumbnail for video %s", video_id)
-            finally:
-                db.close()
+            return thumb if ok else None
 
-    await asyncio.gather(*[_one(vid, p) for vid, p in pairs])
+    results = await asyncio.gather(*[_one(vid, p) for vid, p in pairs])
+
+    db = SessionLocal()
+    try:
+        for video_id, thumb_path in zip([vid for vid, _ in pairs], results):
+            if thumb_path is None:
+                continue
+            video = db.get(Video, video_id)
+            if video:
+                video.thumbnail_path = str(thumb_path)
+                db.add(video)
+        db.commit()
+    except Exception:
+        logger.exception("Failed to save thumbnails")
+    finally:
+        db.close()
 
 
 @app.post("/videos/upload")
@@ -657,7 +661,6 @@ def video_download_720p(
     path = video_path(video.filename_720p)
     if not path.exists():
         raise HTTPException(status_code=404, detail="File missing on disk")
-    from pathlib import PurePath
     stem = PurePath(video.original_name).stem
     download_name = f"{stem}_720p.mp4"
     return FileResponse(
@@ -797,9 +800,7 @@ def set_video_tags(
     video.tags = tags
     db.add(video)
     db.commit()
-    if return_to:
-        return RedirectResponse(url=return_to, status_code=303)
-    return _redirect(f"/videos/{video_id}")
+    return _redirect(_safe_return_to(return_to) or f"/videos/{video_id}")
 
 
 @app.get("/upload/tags", response_class=HTMLResponse)
@@ -869,7 +870,7 @@ def tag_create(
     if not name:
         raise HTTPException(status_code=400, detail="Empty name")
     exists = db.scalar(select(func.count()).select_from(Tag).where(Tag.name == name))
-    if exists:
+    if exists > 0:
         return _redirect("/tags")
     description_clean = description.strip() if description else None
     db.add(Tag(name=name, description=description_clean or None))
@@ -1170,7 +1171,8 @@ def library_import(
     skipped = 0
 
     for item in items:
-        filename = item.get("filename")
+        raw_filename = item.get("filename") or ""
+        filename = Path(raw_filename).name
         if not filename:
             skipped += 1
             continue
@@ -1181,9 +1183,9 @@ def library_import(
             continue
 
         dest = video_path(filename)
-        if filename in zf.namelist():
+        if raw_filename in zf.namelist():
             with dest.open("wb") as f:
-                f.write(zf.read(filename))
+                f.write(zf.read(raw_filename))
         else:
             skipped += 1
             continue
