@@ -208,6 +208,7 @@ def transcode_to_h264(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE if video_id else subprocess.DEVNULL,
             text=True,
+            bufsize=1,
         )
         
         if video_id and proc.stderr:

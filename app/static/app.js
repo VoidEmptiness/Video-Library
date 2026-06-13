@@ -757,10 +757,14 @@ function wireQualitySwitch() {
     if (!target) return;
 
     video.src = target.src;
-    video.currentTime = currentTime;
-    if (wasPlaying) {
-      video.play().catch(() => {});
-    }
+    const restore = () => {
+      video.currentTime = currentTime;
+      video.removeEventListener("loadedmetadata", restore);
+      if (wasPlaying) {
+        video.play().catch(() => {});
+      }
+    };
+    video.addEventListener("loadedmetadata", restore, { once: true });
   });
 }
 
@@ -1009,6 +1013,45 @@ updatePlayIcon();
   updateSeek();
 }
 
+function showToast(message) {
+  const el = document.getElementById("toast");
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = false;
+  el.classList.remove("toast--hide");
+  el.classList.add("toast--show");
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => {
+    el.classList.remove("toast--show");
+    el.classList.add("toast--hide");
+    el._timer = setTimeout(() => { el.hidden = true; }, 300);
+  }, 4000);
+}
+
+function wireToast() {
+  const params = new URLSearchParams(window.location.search);
+  const imported = params.get("imported");
+  const skipped = params.get("skipped");
+  if (imported !== null) {
+    showToast(`Импортировано: ${imported}, пропущено: ${skipped || 0}`);
+    const url = new URL(window.location);
+    url.searchParams.delete("imported");
+    url.searchParams.delete("skipped");
+    history.replaceState({}, "", url);
+  }
+}
+
+function wireFilePicker() {
+  const btn = document.querySelector("[data-file-picker-btn]");
+  const input = document.getElementById("importFileInput");
+  const label = document.querySelector("[data-file-picker-name]");
+  if (!btn || !input || !label) return;
+  btn.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => {
+    label.textContent = input.files[0]?.name || "Файл не выбран";
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireSearchForm();
   wireUntaggedFilter();
@@ -1024,4 +1067,6 @@ document.addEventListener("DOMContentLoaded", () => {
   wireVolumeSlider();
   applyDefaultVolume();
   wireCustomControls();
+  wireToast();
+  wireFilePicker();
 });

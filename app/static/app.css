@@ -1621,8 +1621,53 @@ html[data-theme="dark"] .video-card:hover {
   color: #fff;
 }
 
+.file-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.file-picker input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.file-picker-name {
+  font-size: 0.85rem;
+  color: var(--muted);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .auth-divider {
   border: none;
   border-top: 1px solid var(--line);
   margin: 1.25rem 0;
+}
+
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 9999;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s;
+}
+.toast--show {
+  opacity: 1;
+  transform: translateY(0);
+}
+.toast--hide {
+  opacity: 0;
+  transform: translateY(0.75rem);
 }

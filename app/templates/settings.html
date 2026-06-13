@@ -20,7 +20,7 @@
         </button>
         <input type="range" name="default_volume" min="0" max="1" step="0.01" value="{{ default_volume }}"
                data-volume-slider class="volume-slider"
-         style="--volume-pct: {{ "%.0f"|format(default_volume * 100) }}%;" />
+         style='--volume-pct: {{ "%.0f"|format(default_volume * 100) }}%;' />
         <span data-volume-label class="volume-label">
           {{ "%.0f"|format(default_volume * 100) }}%
         </span>
@@ -71,4 +71,31 @@
       </div>
     </section>
   </form>
-{% endblock %}
+
+  <section class="section-block" style="margin-top:1.5rem">
+    <div class="panel-title">
+      <h2>Экспорт библиотеки</h2>
+      <p>Скачать архив library.zip со всеми видеофайлами и файлом library.json (метаданные + теги). Видео сохраняются без пережатия.</p>
+    </div>
+    <div class="toolbar">
+      <a class="button" href="/library/export">Скачать library.zip</a>
+    </div>
+  </section>
+
+  <form method="post" action="/library/import" enctype="multipart/form-data" class="form-stack" style="margin-top:1.5rem">
+    <section class="section-block">
+      <div class="panel-title">
+        <h2>Импорт библиотеки</h2>
+        <p>Загрузить library.zip — скрипт прочитает library.json, скопирует видеофайлы и восстановит теги.</p>
+      </div>
+      <div class="toolbar">
+        <div class="file-picker">
+          <input type="file" name="file" id="importFileInput" accept=".zip" required />
+          <button type="button" class="button secondary" data-file-picker-btn>Выбрать файл</button>
+          <span class="file-picker-name" data-file-picker-name>Файл не выбран</span>
+        </div>
+        <button class="button" type="submit" onclick="return confirm('Импортировать видео из ZIP? Существующие видео с таким же filename будут пропущены.')">Импортировать</button>
+      </div>
+    </section>
+  </form>
+  {% endblock %}

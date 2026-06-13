@@ -85,7 +85,7 @@ def _migrate_db() -> None:
         for ix_name in indexes:
             if ix_name and "name" in ix_name.lower():
                 with engine.connect() as conn:
-                    conn.execute(text(f"DROP INDEX IF EXISTS \"{ix_name}\""))
+                    conn.execute(text("DROP INDEX IF EXISTS \"%s\"" % ix_name.replace("\"", "\"\"")))
                     conn.commit()
                 break
     except Exception:
@@ -1106,6 +1106,116 @@ def folder_view(
     )
 
 
+@app.get("/library/export")
+def library_export(
+    db: Annotated[Session, Depends(get_db)],
+    _: AdminUser,
+):
+    videos = list(
+        db.execute(
+            select(Video).options(joinedload(Video.tags)).order_by(Video.id)
+        )
+        .unique()
+        .scalars()
+    )
+    meta = []
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for video in videos:
+            src = video_path(video.filename)
+            if src.exists():
+                zf.write(str(src), video.filename)
+            meta.append({
+                "filename": video.filename,
+                "filename_720p": video.filename_720p,
+                "original_name": video.original_name,
+                "content_type": video.content_type,
+                "size_bytes": video.size_bytes,
+                "created_at": video.created_at.isoformat() if video.created_at else None,
+                "tags": [{"name": t.name, "description": t.description} for t in video.tags],
+            })
+        zf.writestr("library.json", json.dumps(meta, ensure_ascii=False, indent=2))
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="library.zip"'},
+    )
+
+
+@app.post("/library/import")
+def library_import(
+    db: Annotated[Session, Depends(get_db)],
+    _: AdminUserHTML,
+    file: UploadFile = File(...),
+):
+    raw = file.file.read()
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw), "r")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid ZIP file")
+
+    if "library.json" not in zf.namelist():
+        raise HTTPException(status_code=400, detail="ZIP must contain library.json")
+
+    try:
+        items = json.loads(zf.read("library.json"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid library.json in archive")
+
+    if not isinstance(items, list):
+        items = [items]
+
+    ensure_dirs()
+    imported = 0
+    skipped = 0
+
+    for item in items:
+        filename = item.get("filename")
+        if not filename:
+            skipped += 1
+            continue
+
+        existing = db.scalar(select(Video).where(Video.filename == filename))
+        if existing:
+            skipped += 1
+            continue
+
+        dest = video_path(filename)
+        if filename in zf.namelist():
+            with dest.open("wb") as f:
+                f.write(zf.read(filename))
+        else:
+            skipped += 1
+            continue
+
+        video = Video(
+            filename=filename,
+            filename_720p=item.get("filename_720p"),
+            original_name=item.get("original_name", filename),
+            content_type=item.get("content_type", "application/octet-stream"),
+            size_bytes=item.get("size_bytes", dest.stat().st_size),
+        )
+        db.add(video)
+        db.flush()
+
+        for tag_item in item.get("tags", []):
+            name = tag_item.get("name")
+            if not name:
+                continue
+            tag = db.scalar(select(Tag).where(Tag.name == name))
+            if not tag:
+                tag = Tag(name=name, description=tag_item.get("description"))
+                db.add(tag)
+                db.flush()
+            video.tags.append(tag)
+
+        imported += 1
+
+    zf.close()
+    db.commit()
+    return _redirect(f"/?imported={imported}&skipped={skipped}")
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(
     request: Request,
@@ -1142,7 +1252,7 @@ def reset_thumbnails(
     db: Annotated[Session, Depends(get_db)],
     _: AdminUserHTML,
 ):
-    videos = db.query(Video).all()
+    videos = list(db.scalars(select(Video)))
     thumb_pairs: list[tuple[int, Path]] = []
     for video in videos:
         old_thumb = Path(video.thumbnail_path) if video.thumbnail_path else THUMB_DIR / f"{video.id}.jpg"
