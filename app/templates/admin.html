@@ -1,0 +1,523 @@
+{% extends "_layout.html" %}
+{% block content %}
+{% set subpath = subpath or "" %}
+
+<style>
+  .shell {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 20px clamp(39px, 4vw, 63px) 100px clamp(39px, 4vw, 63px);
+    min-height: calc(100vh - 74px);
+    display: flex;
+    flex-direction: column;
+  }
+</style>
+
+<div style="display:flex; gap:28px; align-items:stretch; flex:1;">
+  <div style="flex:1; min-width:0;">
+
+<div class="page-head">
+  <h1>Админка / {{ subpath.replace('/', ' / ') if subpath else '_data' }}</h1>
+  <div class="page-actions">
+    <span class="mode-pill" id="file-stats" data-file-stats></span>
+    <button class="button" type="button" id="btn-create-file">+ Создать файл</button>
+  </div>
+</div>
+
+<nav class="breadcrumbs" aria-label="Навигация">
+  <a href="/admin" class="breadcrumb-link">_data</a>
+  {% set parts = subpath.split('/') %}
+  {% for part in parts %}
+    {% if part %}
+      <span class="breadcrumb-sep">/</span>
+      {% if loop.index0 < parts|length - 1 %}
+        <a href="/admin?path={{ '/'.join(parts[:loop.index]) }}" class="breadcrumb-link">{{ part }}</a>
+      {% else %}
+        <span class="breadcrumb-current">{{ part }}</span>
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+  {% if subpath %}
+    <span style="margin-left:12px;">
+      <a href="/admin?path={{ subpath.rsplit('/', 1)[0] if '/' in subpath else '' }}" class="button compact secondary" title="На уровень вверх">↑</a>
+    </span>
+  {% endif %}
+</nav>
+
+<div class="toolbar">
+  <input class="grow" type="text" id="file-search" placeholder="Поиск файлов..." data-admin-search autofocus />
+  <button class="button secondary" type="button" id="download-all-btn">Скачать всё</button>
+</div>
+
+{% if files %}
+<form method="post" action="/admin/download-selected" id="admin-form" data-admin-form>
+  <input type="hidden" name="path" value="{{ subpath }}" />
+
+  <div class="admin-table-wrap">
+    <table class="admin-table" data-admin-table>
+      <thead>
+        <tr>
+          <th class="col-check">
+            <input type="checkbox" id="select-all" data-select-all-admin />
+          </th>
+          <th class="col-name" data-sort="filename">Файл <span class="sort-arrow">▲</span></th>
+          <th class="col-size" data-sort="size">Размер</th>
+          <th class="col-date" data-sort="mtime">Изменён</th>
+          <th class="col-actions">Действие</th>
+        </tr>
+      </thead>
+      <tbody id="file-tbody">
+        {% for f in files %}
+        <tr data-file-row data-filename="{{ f.name }}" data-size="{{ f.size_bytes }}" data-mtime="{{ f.mtime }}" data-isdir="{{ '1' if f.is_dir else '0' }}">
+          <td class="col-check">
+            <input type="checkbox" name="selected" value="{{ f.name }}" class="file-checkbox" data-file-cb />
+          </td>
+          <td class="col-name">
+            {% if f.is_dir %}
+            <a href="/admin?path={{ (subpath + '/' + f.name) if subpath else f.name }}" class="file-row-link">
+              <span class="file-icon folder-icon">📁</span>
+              <span class="file-label">{{ f.name }}/</span>
+            </a>
+            {% else %}
+            <span class="file-icon">{{ "📄" if f.is_text else "📦" }}</span>
+            <span class="file-label" data-file-label>{{ f.name }}</span>
+            {% endif %}
+          </td>
+          <td class="col-size">{{ f.size }}</td>
+          <td class="col-date">{{ f.mtime | format_mtime }}</td>
+          <td class="col-actions">
+            {% if f.is_dir %}
+            <button class="button compact action-btn" type="button" data-action="download-dir" data-file="{{ f.name }}" title="Скачать папку">⬇</button>
+            <button class="button compact action-btn" type="button" data-action="rename" data-file="{{ f.name }}" title="Переименовать">✏</button>
+            <button class="button compact action-btn danger" type="button" data-action="delete" data-file="{{ f.name }}" data-confirm="Удалить папку «{{ f.name }}» со всем содержимым?" title="Удалить">✕</button>
+            {% else %}
+            <button class="button compact action-btn" type="button" data-action="download" data-file="{{ f.name }}" title="Скачать">⬇</button>
+            {% if f.is_text %}
+            <button class="button compact action-btn" type="button" data-action="preview" data-file="{{ f.name }}" title="Просмотр / Редактировать">✎</button>
+            {% endif %}
+            <button class="button compact action-btn" type="button" data-action="rename" data-file="{{ f.name }}" title="Переименовать">✏</button>
+            <button class="button compact action-btn danger" type="button" data-action="delete" data-file="{{ f.name }}" data-confirm="Удалить «{{ f.name }}»?" title="Удалить">✕</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="selection-bar" data-selection-bar hidden>
+    <span data-selected-count>0 выбрано</span>
+    <button class="button secondary compact" type="submit">Скачать выбранные</button>
+    <button class="button secondary compact" type="button" id="delete-selected-btn">Удалить выбранные</button>
+    <button class="button secondary compact" type="button" id="clear-selection">Снять выбор</button>
+  </div>
+</form>
+
+<form method="post" action="/admin/delete-selected" id="delete-selected-form" style="display:none;" data-delete-selected-form>
+  <input type="hidden" name="path" value="{{ subpath }}" />
+</form>
+
+{% for f in files %}
+<form method="post" action="/admin/delete/{{ f.name }}" id="delete-{{ f.name }}" style="display:none;" data-delete-form="{{ f.name }}">
+  <input type="hidden" name="path" value="{{ subpath }}" />
+</form>
+{% endfor %}
+
+{% else %}
+<div class="empty-state" style="text-align:center;padding:60px 0;">
+  <p style="font-size:18px;margin-bottom:12px;">Папка пуста.</p>
+  <p style="color:var(--muted);">Создайте новый файл или загрузите файлы через форму ниже.</p>
+</div>
+{% endif %}
+
+<form method="post" action="/admin/upload" enctype="multipart/form-data" class="form-stack" id="admin-upload-form" style="margin-top:20px;">
+  <input type="hidden" name="path" value="{{ subpath }}" />
+  <div class="file-picker">
+    <button class="button secondary" type="button" id="admin-file-picker-btn">Выбрать файлы</button>
+    <span class="file-picker-name" id="admin-file-picker-name">Файлы не выбраны</span>
+  </div>
+  <input type="file" name="files" multiple id="admin-file-input" style="display:none" />
+  <div>
+    <button class="button" type="submit">Загрузить</button>
+  </div>
+</form>
+
+  </div>
+  <div style="width:420px; flex-shrink:0;">
+
+<section class="section-block">
+  <div class="panel-title">
+    <h2>Экспорт библиотеки</h2>
+    <p>Скачать архив library.zip со всеми видеофайлами и файлом library.json (метаданные + теги). Видео сохраняются без пережатия.</p>
+  </div>
+  <div class="toolbar">
+    <a class="button" href="/library/export">Скачать library.zip</a>
+  </div>
+</section>
+
+<form method="post" action="/library/import" enctype="multipart/form-data" class="form-stack" style="margin-top:1.5rem">
+  <section class="section-block">
+    <div class="panel-title">
+      <h2>Импорт библиотеки</h2>
+      <p>Загрузить library.zip — скрипт прочитает library.json, скопирует видеофайлы и восстановит теги.</p>
+    </div>
+    <div class="toolbar" style="flex-wrap:wrap; gap:8px;">
+      <div class="file-picker">
+        <input type="file" name="file" id="importFileInput" accept=".zip" required />
+        <button type="button" class="button secondary" data-file-picker-btn>Выбрать файл</button>
+        <span class="file-picker-name" data-file-picker-name>Файл не выбран</span>
+      </div>
+      <button class="button" type="submit" data-confirm="Импортировать видео из ZIP? Существующие видео с таким же filename будут пропущены.">Импортировать</button>
+    </div>
+  </section>
+</form>
+
+  </div>
+</div>
+
+<div class="modal-overlay" id="preview-modal" hidden data-preview-modal>
+  <div class="modal modal-full" role="dialog" aria-labelledby="preview-title">
+    <div class="modal-title">
+      <h3 id="preview-title">Просмотр файла</h3>
+      <p id="preview-filename"></p>
+    </div>
+    <textarea id="preview-content" class="admin-editor" spellcheck="false"></textarea>
+    <div class="toolbar">
+      <button class="button" id="preview-save" type="button">Сохранить</button>
+      <button class="button secondary" id="preview-close" type="button">Закрыть</button>
+      <span id="preview-status" style="margin-left:auto;font-size:13px;color:var(--muted);"></span>
+    </div>
+  </div>
+</div>
+
+<form method="post" id="rename-form" style="display:none;" data-rename-form>
+  <input type="hidden" name="old_name" id="rename-old" />
+  <input type="hidden" name="new_name" id="rename-new" />
+  <input type="hidden" name="path" id="rename-path" value="{{ subpath }}" />
+</form>
+
+<form method="post" id="create-form" action="/admin/create" style="display:none;" data-create-form>
+  <input type="hidden" name="filename" id="create-filename" />
+  <input type="hidden" name="path" value="{{ subpath }}" />
+</form>
+
+<form method="post" id="save-form" action="" style="display:none;" data-save-form>
+  <input type="hidden" name="content" id="save-content" />
+  <input type="hidden" name="path" value="{{ subpath }}" />
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  wireAdminPage();
+  const params = new URLSearchParams(window.location.search);
+  const error = params.get('error');
+  if (error) {
+    showAlert(decodeURIComponent(error));
+    const url = new URL(window.location);
+    url.searchParams.delete('error');
+    history.replaceState({}, '', url);
+  }
+});
+
+function wireAdminPage() {
+  const subpath = '{{ subpath | replace("'", "\\'") }}';
+  const search = document.getElementById('file-search');
+  const tbody = document.getElementById('file-tbody');
+  const rows = Array.from(tbody?.querySelectorAll('[data-file-row]') || []);
+  const fileRows = rows.filter(r => r.dataset.isdir !== '1');
+  const stats = document.getElementById('file-stats');
+  const selectAll = document.getElementById('select-all');
+  const selectionBar = document.querySelector('[data-selection-bar]');
+  const selectedCount = document.querySelector('[data-selected-count]');
+  const clearSel = document.getElementById('clear-selection');
+
+  if (stats && fileRows.length) {
+    const totalSize = fileRows.reduce((sum, r) => sum + (parseInt(r.dataset.size) || 0), 0);
+    const sizeStr = totalSize < 1024 ? totalSize + ' B' :
+      totalSize < 1048576 ? (totalSize / 1024).toFixed(1) + ' KB' :
+      (totalSize / 1048576).toFixed(1) + ' MB';
+    stats.textContent = fileRows.length + ' файл. — ' + sizeStr;
+  } else if (stats) {
+    stats.textContent = '0 файлов';
+  }
+
+  function qs(extra) {
+    const p = subpath ? 'path=' + encodeURIComponent(subpath) : '';
+    return (p || extra) ? '?' + [p, extra].filter(Boolean).join('&') : '';
+  }
+
+  const checkableRows = rows.filter(r => r.querySelector('[data-file-cb]'));
+
+  function updateSelectionBar() {
+    const checked = checkableRows.filter(r => r.querySelector('[data-file-cb]')?.checked);
+    if (selectionBar) selectionBar.hidden = checked.length === 0;
+    if (selectedCount) selectedCount.textContent = checked.length + ' выбрано';
+    if (clearSel) clearSel.style.display = checked.length ? '' : 'none';
+  }
+
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      const visible = checkableRows.filter(r => !r.hidden);
+      for (const row of visible) {
+        const cb = row.querySelector('[data-file-cb]');
+        if (cb) cb.checked = this.checked;
+      }
+      updateSelectionBar();
+    });
+  }
+
+  if (clearSel) {
+    clearSel.addEventListener('click', function() {
+      for (const row of checkableRows) {
+        const cb = row.querySelector('[data-file-cb]');
+        if (cb) cb.checked = false;
+      }
+      if (selectAll) selectAll.checked = false;
+      updateSelectionBar();
+    });
+  }
+
+  for (const row of checkableRows) {
+    const cb = row.querySelector('[data-file-cb]');
+    if (cb) {
+      cb.addEventListener('change', function() {
+        updateSelectionBar();
+        if (selectAll) {
+          const visible = checkableRows.filter(r => !r.hidden);
+          selectAll.checked = visible.every(r => r.querySelector('[data-file-cb]')?.checked);
+        }
+      });
+    }
+  }
+
+  search?.addEventListener('input', function() {
+    const q = this.value.trim().toLocaleLowerCase();
+    for (const row of rows) {
+      const name = (row.dataset.filename || '').toLocaleLowerCase();
+      row.hidden = !(!q || name.includes(q));
+    }
+    if (selectAll) selectAll.checked = false;
+    updateSelectionBar();
+  });
+
+  // Download all
+  document.getElementById('download-all-btn')?.addEventListener('click', function() {
+    window.location.href = '/admin/download-all' + qs();
+  });
+
+  // Download single file
+  tbody?.addEventListener('click', function(e) {
+    const btn = e.target.closest('[data-action="download"]');
+    if (!btn) return;
+    window.location.href = '/admin/download/' + encodeURIComponent(btn.dataset.file) + qs();
+  });
+
+  // Download folder
+  tbody?.addEventListener('click', function(e) {
+    const btn = e.target.closest('[data-action="download-dir"]');
+    if (!btn) return;
+    window.location.href = '/admin/download-dir/' + encodeURIComponent(btn.dataset.file) + qs();
+  });
+
+  // Delete selected (bulk)
+  document.getElementById('delete-selected-btn')?.addEventListener('click', async function() {
+    const checked = fileRows.filter(r => r.querySelector('[data-file-cb]')?.checked);
+    if (!checked.length) return;
+    const names = checked.map(r => r.dataset.filename);
+    const ok = await showConfirm('Удалить выбранные файлы (' + checked.length + ')?');
+    if (ok) {
+      const form = document.querySelector('[data-delete-selected-form]');
+      form.innerHTML = '';
+      const inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = 'path';
+      inp.value = subpath;
+      form.appendChild(inp);
+      for (const name of names) {
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'selected';
+        inp.value = name;
+        form.appendChild(inp);
+      }
+      form.submit();
+    }
+  });
+
+  // Delete with custom confirm dialog
+  tbody?.addEventListener('click', async function(e) {
+    const btn = e.target.closest('[data-action="delete"]');
+    if (!btn) return;
+    e.preventDefault();
+    const msg = btn.getAttribute('data-confirm') || 'Удалить файл?';
+    const ok = await showConfirm(msg);
+    if (ok) {
+      const file = btn.dataset.file;
+      const form = document.querySelector('[data-delete-form="' + file + '"]');
+      if (form) form.submit();
+    }
+  });
+
+  // Rename with custom prompt dialog
+  tbody?.addEventListener('click', async function(e) {
+    const btn = e.target.closest('[data-action="rename"]');
+    if (!btn) return;
+    e.preventDefault();
+    const oldName = btn.dataset.file;
+    const newName = await showPrompt('Новое имя файла:', oldName);
+    if (newName && newName !== oldName) {
+      document.getElementById('rename-old').value = oldName;
+      document.getElementById('rename-new').value = newName;
+      document.getElementById('rename-path').value = subpath;
+      document.getElementById('rename-form').action = '/admin/rename';
+      document.getElementById('rename-form').submit();
+    }
+  });
+
+  // Preview / Edit with custom modal
+  tbody?.addEventListener('click', async function(e) {
+    const btn = e.target.closest('[data-action="preview"]');
+    if (!btn) return;
+    e.preventDefault();
+    const file = btn.dataset.file;
+    await openPreviewModal(file);
+  });
+
+  // Custom file picker
+  const filePickerBtn = document.getElementById('admin-file-picker-btn');
+  const fileInput = document.getElementById('admin-file-input');
+  const fileNameLabel = document.getElementById('admin-file-picker-name');
+  const uploadForm = document.getElementById('admin-upload-form');
+  if (filePickerBtn && fileInput && fileNameLabel) {
+    filePickerBtn.addEventListener('click', function() { fileInput.click(); });
+    fileInput.addEventListener('change', function() {
+      const files = fileInput.files;
+      if (!files || files.length === 0) {
+        fileNameLabel.textContent = 'Файлы не выбраны';
+      } else if (files.length === 1) {
+        fileNameLabel.textContent = files[0].name;
+      } else {
+        fileNameLabel.textContent = 'Выбрано файлов: ' + files.length;
+      }
+    });
+  }
+  if (uploadForm) {
+    uploadForm.addEventListener('submit', function(e) {
+      if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        e.preventDefault();
+        showAlert('Сначала выберите файлы для загрузки.');
+      }
+    });
+  }
+
+  // Create file with custom prompt
+  document.getElementById('btn-create-file')?.addEventListener('click', async function() {
+    const name = await showPrompt('Имя нового файла:', 'new_file.txt');
+    if (name) {
+      document.getElementById('create-filename').value = name;
+      document.querySelector('#create-form input[name="path"]').value = subpath;
+      document.getElementById('create-form').submit();
+    }
+  });
+
+  // Sort
+  document.querySelectorAll('[data-sort]').forEach(function(th) {
+    th.addEventListener('click', function() {
+      const key = th.dataset.sort;
+      const asc = th.classList.toggle('sort-asc');
+      document.querySelectorAll('[data-sort]').forEach(function(h) {
+        if (h !== th) h.classList.remove('sort-asc');
+      });
+      const arrow = th.querySelector('.sort-arrow');
+      if (arrow) arrow.textContent = asc ? '▲' : '▼';
+
+      const sorted = Array.from(rows);
+      sorted.sort(function(a, b) {
+        const aIsDir = a.dataset.isdir === '1';
+        const bIsDir = b.dataset.isdir === '1';
+        if (aIsDir && !bIsDir) return -1;
+        if (!aIsDir && bIsDir) return 1;
+
+        let va = a.dataset[key] || '';
+        let vb = b.dataset[key] || '';
+        if (key === 'size' || key === 'mtime') {
+          va = parseFloat(va) || 0;
+          vb = parseFloat(vb) || 0;
+          return asc ? va - vb : vb - va;
+        }
+        return asc ? va.localeCompare(vb, undefined, { numeric: true, sensitivity: 'base' }) : vb.localeCompare(va, undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      for (const row of sorted) tbody.appendChild(row);
+    });
+  });
+}
+
+async function openPreviewModal(file) {
+  const subpath = '{{ subpath | replace("'", "\\'") }}';
+  const modal = document.getElementById('preview-modal');
+  const titleEl = document.getElementById('preview-filename');
+  const content = document.getElementById('preview-content');
+  const saveBtn = document.getElementById('preview-save');
+  const closeBtn = document.getElementById('preview-close');
+  const status = document.getElementById('preview-status');
+
+  modal.hidden = false;
+  titleEl.textContent = file;
+  content.value = 'Загрузка...';
+  content.disabled = true;
+  saveBtn.disabled = true;
+  status.textContent = '';
+
+  const qs = subpath ? '?path=' + encodeURIComponent(subpath) : '';
+  try {
+    const resp = await fetch('/admin/read/' + encodeURIComponent(file) + qs);
+    if (!resp.ok) {
+      const err = await resp.text();
+      content.value = 'Ошибка загрузки: ' + err;
+      return;
+    }
+    const data = await resp.json();
+    content.value = data.content;
+    content.disabled = false;
+    saveBtn.disabled = false;
+    status.textContent = 'Файл загружен. Нажмите Сохранить чтобы применить изменения.';
+  } catch (err) {
+    content.value = 'Ошибка: ' + err.message;
+    return;
+  }
+
+  function closeModal() {
+    modal.hidden = true;
+    saveBtn.onclick = null;
+    closeBtn.onclick = null;
+    document.removeEventListener('keydown', onPreviewKey);
+  }
+
+  function onPreviewKey(e) {
+    if (e.key === 'Escape') closeModal();
+  }
+
+  saveBtn.onclick = async function() {
+    saveBtn.disabled = true;
+    status.textContent = 'Сохранение...';
+    try {
+      const form = document.querySelector('[data-save-form]');
+      document.getElementById('save-content').value = content.value;
+      const actionQs = subpath ? '?path=' + encodeURIComponent(subpath) : '';
+      form.action = '/admin/save/' + encodeURIComponent(file) + actionQs;
+      form.submit();
+    } catch (err) {
+      status.textContent = 'Ошибка: ' + err.message;
+      saveBtn.disabled = false;
+    }
+  };
+
+  closeBtn.onclick = closeModal;
+  document.addEventListener('keydown', onPreviewKey);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) closeModal();
+  });
+}
+</script>
+{% endblock %}

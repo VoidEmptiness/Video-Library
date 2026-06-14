@@ -19,6 +19,7 @@ services:
       MAX_FILES_PER_UPLOAD: "100"
       THUMBNAIL_CONCURRENCY: "4"
       SETTINGS_DIR: "/data"
+      DATA_DIR: "/data"
     volumes:
       - videodata:/data
 

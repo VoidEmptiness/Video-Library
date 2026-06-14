@@ -152,9 +152,12 @@ def transcode_to_h264(
     target_fps: int | None = None,
 ) -> bool:
     if not ffmpeg_available():
+        logger.warning("ffmpeg not available, cannot transcode %s", input_path)
         return False
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Starting transcode: %s -> %s (height=%s, fps=%s)",
+                input_path.name, output_path.name, downscale_height, target_fps)
 
     duration = None
     if video_id and ffprobe_available():
@@ -235,8 +238,23 @@ def transcode_to_h264(
         
         if video_id:
             clear_progress(video_id)
+        logger.info("Transcode finished: %s -> %s (%d bytes)",
+                    input_path.name, output_path.name, output_path.stat().st_size)
         return output_path.exists() and output_path.stat().st_size > 0
-    except subprocess.CalledProcessError:
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        logger.warning("Transcode timeout for %s after %d seconds", input_path, TRANSCODE_TIMEOUT_SECONDS)
+        if video_id:
+            write_progress(video_id, "Таймаут транскодирования", 0)
+        try:
+            if output_path.exists():
+                output_path.unlink()
+        except Exception:
+            pass
+        return False
+    except subprocess.CalledProcessError as e:
+        logger.error("Transcode failed for %s: returncode=%s", input_path, e.returncode)
         if video_id:
             write_progress(video_id, "Ошибка транскодирования", 0)
         try:
@@ -245,7 +263,8 @@ def transcode_to_h264(
         except Exception:
             pass
         return False
-    except Exception:
+    except Exception as e:
+        logger.exception("Transcode error for %s: %s", input_path, e)
         try:
             if output_path.exists():
                 output_path.unlink()

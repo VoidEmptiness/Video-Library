@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+README.md
+docker-compose.yml
+_data
+ffmpeg
+.venv
+venv
+env
+*.egg-info
+dist
+build

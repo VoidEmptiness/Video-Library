@@ -82,8 +82,8 @@
     <div class="section-title">
       <h2>{% if untagged_filter %}Видео без тегов{% else %}Все видео{% endif %}</h2>
       <div class="selection-actions">
-        <span>{{ videos | length }}</span>
-        {% if videos|length > 0 and user != "guest" %}
+        <span>{{ total_videos }}</span>
+        {% if total_videos > 0 and user != "guest" %}
           <button class="button secondary compact" type="button" data-select-toggle>Выбрать</button>
         {% endif %}
       </div>
@@ -148,6 +148,20 @@
           {% endfor %}
         </div>
       </form>
+
+      {% if total_pages > 1 %}
+      <div class="pagination">
+        <span class="pagination-info">Страница {{ page }} из {{ total_pages }} ({{ total_videos }} видео)</span>
+        <div class="pagination-links">
+          {% if page > 1 %}
+          <a class="button secondary compact" href="?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}">← Назад</a>
+          {% endif %}
+          {% if page < total_pages %}
+          <a class="button secondary compact" href="?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}">Вперёд →</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
 
       <div class="modal-overlay" data-bulk-tags-modal hidden>
         <div class="modal">

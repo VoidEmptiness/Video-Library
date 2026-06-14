@@ -3,14 +3,19 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import threading
+from datetime import datetime, timezone
 import os
 import json
+import shutil
 import subprocess
+import tempfile
 import time
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
@@ -21,17 +26,30 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from .database import SessionLocal, engine, get_db
-from .models import Base, Folder, Tag, Video, VideoTag
+from .models import (
+    TRANSCODE_STATUS_DONE,
+    TRANSCODE_STATUS_FAILED,
+    TRANSCODE_STATUS_PENDING,
+    TRANSCODE_STATUS_RUNNING,
+    Base,
+    Folder,
+    Tag,
+    TranscodeJob,
+    Video,
+    VideoTag,
+)
 from .services.auth import GUEST_USER, SESSION_COOKIE, create_session_token, is_guest, parse_session_token, session_expiry_dt, verify_credentials
-from .services.storage import THUMB_DIR, VIDEO_DIR, ensure_dirs, unique_storage_name, video_path
+from .services.storage import THUMB_DIR, ensure_dirs, unique_storage_name, video_path
+
+DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).parent.parent / "_data")))
 from .services.thumbnails import generate_thumbnail
 from .services.settings import get_setting, load_settings, save_settings
 from .services.transcoding import (
     FFPROBE_EXE,
     TRANSCODE_DOWNSCALE_FPS,
     TRANSCODE_DOWNSCALE_HEIGHT,
-    TRANSCODE_DOWNSCALE_MAX_HEIGHT,
     ffprobe_available,
+    get_progress_file,
     transcode_to_h264,
     video_fps,
     video_height,
@@ -43,19 +61,37 @@ logger = logging.getLogger(__name__)
 APP_TITLE = os.getenv("APP_TITLE", "Video Library")
 MAX_FILES_PER_UPLOAD = int(os.getenv("MAX_FILES_PER_UPLOAD", "50"))
 THUMBNAIL_CONCURRENCY = int(os.getenv("THUMBNAIL_CONCURRENCY", "4"))
+PAGE_SIZE = int(os.getenv("PAGE_SIZE", "30"))
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def _format_mtime(timestamp: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(timestamp))
+
+
+templates.env.filters["format_mtime"] = _format_mtime
 templates.env.globals["static_version"] = str(int(time.time()))
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
+    )
+    logger.info("Starting %s", APP_TITLE)
     ensure_dirs()
     init_db()
+    logger.info("DB initialized")
+    _resume_pending_transcodes()
     yield
+    logger.info("Shutting down %s", APP_TITLE)
 
 
 app = FastAPI(title=APP_TITLE, lifespan=_lifespan)
-app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static") 
 
 
 def short_name(value: str | None, limit: int = 36) -> str:
@@ -77,6 +113,11 @@ def _migrate_db() -> None:
     from sqlalchemy import inspect, text
     try:
         inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        if "transcode_jobs" not in tables:
+            TranscodeJob.__table__.create(engine)
+            logger.info("Created transcode_jobs table")
+
         columns = [col["name"] for col in inspector.get_columns("folders")]
         if "parent_id" not in columns:
             with engine.connect() as conn:
@@ -163,13 +204,13 @@ def _delete_video_files(path: Path, thumb: Path | None) -> None:
     try:
         if path.exists():
             path.unlink()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to delete file %s: %s", path, e)
     try:
         if thumb and thumb.exists():
             thumb.unlink()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to delete thumbnail %s: %s", thumb, e)
 
 
 def _delete_video_files_with_720p(video: Video) -> None:
@@ -181,12 +222,13 @@ def _delete_video_files_with_720p(video: Video) -> None:
             p = video_path(video.filename_720p)
             if p.exists():
                 p.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to delete 720p file %s: %s", video.filename_720p, e)
 
 
 def _probe_video_metadata(path: Path) -> tuple[str | None, float | None, int | None, int | None]:
     if not ffprobe_available():
+        logger.warning("ffprobe not available, skipping metadata probe for %s", path)
         return None, None, None, None
     try:
         completed = subprocess.run(
@@ -207,7 +249,8 @@ def _probe_video_metadata(path: Path) -> tuple[str | None, float | None, int | N
             timeout=8,
             check=False,
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to probe metadata for %s: %s", path, e)
         return None, None, None, None
     if completed.returncode != 0:
         return None, None, None, None
@@ -234,6 +277,370 @@ def _probe_video_metadata(path: Path) -> tuple[str | None, float | None, int | N
         except (TypeError, ValueError):
             duration = None
     return codec, duration, width, height
+
+
+TEXT_EXTENSIONS = {".txt", ".json", ".md", ".csv", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".log", ".html", ".css", ".js", ".py", ".sh", ".env", ".conf", ".sql", ".rb", ".php", ".pl", ".lua", ".bat", ".ps1"}
+
+
+def _is_text_file(name: str) -> bool:
+    ext = PurePath(name).suffix.lower()
+    return ext in TEXT_EXTENSIONS
+
+
+def _safe_data_path(subpath: str = "") -> Path:
+    root = DATA_DIR.resolve()
+    if subpath:
+        clean = PurePath(subpath).as_posix().strip("/")
+        full = (root / clean).resolve()
+    else:
+        full = root
+    try:
+        full.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+    return full
+
+
+def _dir_size(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for fn in files:
+            try:
+                total += (Path(root) / fn).stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _data_files(subpath: str = "") -> list[dict]:
+    target = _safe_data_path(subpath)
+    if not target.exists():
+        return []
+    items = []
+    for p in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+        st = p.stat()
+        if p.is_dir():
+            size = _dir_size(p)
+        else:
+            size = st.st_size
+        size_bytes = size
+        if size < 1024:
+            size_str = f"{size} B"
+        elif size < 1024 * 1024:
+            size_str = f"{size / 1024:.1f} KB"
+        else:
+            size_str = f"{size / 1024 / 1024:.1f} MB"
+        items.append({
+            "name": p.name,
+            "size": size_str,
+            "size_bytes": size_bytes,
+            "mtime": st.st_mtime,
+            "is_text": _is_text_file(p.name) if p.is_file() else False,
+            "is_dir": p.is_dir(),
+            "path": p,
+        })
+    return items
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(
+    request: Request,
+    _: AdminUserHTML,
+    path: str = "",
+):
+    subpath = path.strip("/")
+    files = _data_files(subpath)
+    return templates.TemplateResponse(
+        "admin.html",
+        {
+            "request": request,
+            "title": f"{APP_TITLE} — Admin / {subpath or '_data'}",
+            "files": files,
+            "subpath": subpath,
+        },
+    )
+
+
+def _safe_file_path(filename: str, subpath: str = "") -> Path:
+    root = DATA_DIR.resolve()
+    clean_name = PurePath(filename).name
+    clean_sub = PurePath(subpath).as_posix().strip("/") if subpath else ""
+    full = (root / clean_sub / clean_name).resolve()
+    try:
+        full.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+    return full
+
+
+@app.get("/admin/download/{filename}")
+def admin_download_file(
+    filename: str,
+    _: AdminUser,
+    path: str = "",
+):
+    fpath = _safe_file_path(filename, path)
+    if not fpath.exists() or not fpath.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path=str(fpath),
+        media_type="application/octet-stream",
+        filename=filename,
+    )
+
+
+@app.get("/admin/download-all")
+def admin_download_all(
+    request: Request,
+    _: AdminUser,
+    path: str = "",
+):
+    subpath = path.strip("/")
+    target = _safe_data_path(subpath)
+    if not target.exists():
+        return RedirectResponse(url="/admin?error=Папка+не+найдена" + (f"&path={quote(subpath)}" if subpath else ""), status_code=303)
+
+    buf = io.BytesIO()
+    name_part = subpath.replace("/", "_") if subpath else "_data"
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(target):
+            root_path = Path(root)
+            for fn in files:
+                fp = root_path / fn
+                arcname = str(fp.relative_to(target))
+                zf.write(str(fp), arcname)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name_part}.zip"'},
+    )
+
+
+@app.post("/admin/download-selected")
+def admin_download_selected(
+    _: AdminUser,
+    selected: Annotated[list[str] | None, Form()] = None,
+    path: Annotated[str, Form()] = "",
+):
+    if not selected:
+        raise HTTPException(status_code=400, detail="No files selected")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in selected:
+            fpath = _safe_file_path(name, path)
+            if not fpath.exists():
+                continue
+            if fpath.is_file():
+                zf.write(str(fpath), name)
+            elif fpath.is_dir():
+                for root, _dirs, files in os.walk(fpath):
+                    root_path = Path(root)
+                    for fn in files:
+                        fp = root_path / fn
+                        arcname = str(Path(name) / fp.relative_to(fpath))
+                        zf.write(str(fp), arcname)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="_data_selected.zip"'},
+    )
+
+
+@app.post("/admin/upload")
+async def admin_upload(
+    _: AdminUserHTML,
+    files: list[UploadFile] = File(...),
+    path: Annotated[str, Form()] = "",
+):
+    subpath = path.strip("/")
+    target = _safe_data_path(subpath)
+    target.mkdir(parents=True, exist_ok=True)
+    for file in files:
+        if not file.filename:
+            continue
+        safe = PurePath(file.filename).name
+        dest = target / safe
+        with dest.open("wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    qs = f"?path={quote(subpath)}" if subpath else ""
+    return RedirectResponse(url=f"/admin{qs}", status_code=303)
+
+
+@app.get("/admin/download-dir/{dirname}")
+def admin_download_dir(
+    dirname: str,
+    _: AdminUser,
+    path: str = "",
+):
+    fpath = _safe_file_path(dirname, path)
+    if not fpath.exists() or not fpath.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(fpath):
+            for fn in files:
+                fp = Path(root) / fn
+                arcname = str(fp.relative_to(fpath))
+                zf.write(str(fp), arcname)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{dirname}.zip"'},
+    )
+
+
+def _rmtree(path: Path):
+    if path.is_dir():
+        for child in path.iterdir():
+            _rmtree(child)
+        path.rmdir()
+    else:
+        path.unlink()
+
+
+def _delete_video_by_filename(db: Session, name: str) -> None:
+    video = db.query(Video).filter(
+        (Video.filename == name) | (Video.filename_720p == name)
+    ).first()
+    if video is None:
+        return
+    # remove video file
+    vpath = video_path(video.filename)
+    if vpath.exists():
+        vpath.unlink()
+    # remove 720p
+    if video.filename_720p:
+        p720 = video_path(video.filename_720p)
+        if p720.exists():
+            p720.unlink()
+    # remove thumbnail
+    thumb = THUMB_DIR / f"{video.id}.jpg"
+    if thumb.exists():
+        thumb.unlink()
+    db.delete(video)
+    db.commit()
+
+
+@app.post("/admin/delete/{filename}")
+def admin_delete_file(
+    filename: str,
+    _: AdminUserHTML,
+    path: Annotated[str, Form()] = "",
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    fpath = _safe_file_path(filename, path)
+    if fpath.exists():
+        _rmtree(fpath)
+        name = PurePath(filename).name
+        _delete_video_by_filename(db, name)
+    qs = f"?path={quote(path)}" if path else ""
+    return RedirectResponse(url=f"/admin{qs}", status_code=303)
+
+
+@app.post("/admin/delete-selected")
+def admin_delete_selected(
+    _: AdminUserHTML,
+    selected: Annotated[list[str] | None, Form()] = None,
+    path: Annotated[str, Form()] = "",
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    if selected:
+        for name in selected:
+            fpath = _safe_file_path(name, path)
+            if fpath.exists():
+                _rmtree(fpath)
+                clean = PurePath(name).name
+                _delete_video_by_filename(db, clean)
+    qs = f"?path={quote(path)}" if path else ""
+    return RedirectResponse(url=f"/admin{qs}", status_code=303)
+
+
+@app.post("/admin/rename")
+def admin_rename_file(
+    _: AdminUserHTML,
+    old_name: str = Form(...),
+    new_name: str = Form(...),
+    path: Annotated[str, Form()] = "",
+):
+    old_safe = PurePath(old_name).name
+    new_safe = PurePath(new_name).name
+    if not old_safe or not new_safe:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    subpath = path.strip("/")
+    base = _safe_data_path(subpath)
+    src = base / old_safe
+    dst = base / new_safe
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    if dst.exists():
+        qs = f"?path={quote(subpath)}&error=" + quote("«" + new_safe + "» уже существует")
+        return RedirectResponse(url=f"/admin{qs}", status_code=303)
+    src.rename(dst)
+    qs = f"?path={quote(subpath)}" if subpath else ""
+    return RedirectResponse(url=f"/admin{qs}", status_code=303)
+
+
+@app.post("/admin/create")
+def admin_create_file(
+    _: AdminUserHTML,
+    filename: str = Form(...),
+    path: Annotated[str, Form()] = "",
+):
+    safe = PurePath(filename).name
+    if not safe:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    subpath = path.strip("/")
+    target = _safe_data_path(subpath)
+    target.mkdir(parents=True, exist_ok=True)
+    fpath = target / safe
+    if fpath.exists():
+        kind = "Файл" if PurePath(safe).suffix else "Папка"
+        qs = f"?path={quote(subpath)}&error=" + quote(kind + " «" + safe + "» уже существует")
+        return RedirectResponse(url=f"/admin{qs}", status_code=303)
+    if PurePath(safe).suffix:
+        fpath.write_text("", encoding="utf-8")
+    else:
+        fpath.mkdir(parents=True, exist_ok=False)
+    qs = f"?path={quote(subpath)}" if subpath else ""
+    return RedirectResponse(url=f"/admin{qs}", status_code=303)
+
+
+@app.get("/admin/read/{filename}")
+def admin_read_file(
+    filename: str,
+    _: AdminUser,
+    path: str = "",
+):
+    fpath = _safe_file_path(filename, path)
+    if not fpath.exists() or not fpath.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    if not _is_text_file(fpath.name):
+        raise HTTPException(status_code=400, detail="Not a text file")
+    content = fpath.read_text("utf-8", errors="replace")
+    return {"name": fpath.name, "content": content}
+
+
+@app.post("/admin/save/{filename}")
+def admin_save_file(
+    filename: str,
+    _: AdminUserHTML,
+    content: str = Form(...),
+    path: Annotated[str, Form()] = "",
+):
+    fpath = _safe_file_path(filename, path)
+    if not fpath.exists() or not fpath.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    if not _is_text_file(fpath.name):
+        raise HTTPException(status_code=400, detail="Not a text file")
+    fpath.write_text(content, encoding="utf-8")
+    qs = f"?path={quote(path)}" if path else ""
+    return RedirectResponse(url=f"/admin{qs}", status_code=303)
 
 
 def _format_duration(seconds: float | None) -> str:
@@ -273,6 +680,33 @@ def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | 
         return None
     end = min(end, file_size - 1)
     return start, end
+
+
+@app.get("/transcode/status/{video_id}")
+def transcode_status(
+    video_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+):
+    job = db.scalar(
+        select(TranscodeJob)
+        .where(TranscodeJob.video_id == video_id)
+        .order_by(TranscodeJob.id.desc())
+        .limit(1)
+    )
+    if not job:
+        return {"status": None}
+    if job.status == TRANSCODE_STATUS_RUNNING:
+        progress_file = get_progress_file(video_id)
+        if progress_file.exists():
+            try:
+                text = progress_file.read_text().strip()
+                if text and "\n" in text:
+                    percent, status_text = text.split("\n", 1)
+                    return {"status": job.status, "percent": float(percent), "text": status_text}
+            except Exception:
+                pass
+    return {"status": job.status, "percent": getattr(job, "progress", 0)}
 
 
 @app.get("/healthz")
@@ -371,6 +805,21 @@ def _video_query(db: Session, tag_ids: set[int] | None = None, q: str | None = N
     return stmt
 
 
+def _video_count(db: Session, tag_ids: set[int] | None = None, q: str | None = None, untagged: bool = False) -> int:
+    stmt = select(func.count(Video.id))
+    if untagged:
+        stmt = stmt.where(~Video.tags.any())
+    elif tag_ids:
+        subq = select(VideoTag.video_id).where(VideoTag.tag_id.in_(tag_ids)).group_by(VideoTag.video_id).subquery()
+        stmt = stmt.where(Video.id.in_(subq))
+    if q:
+        q = q.strip()
+        if q:
+            stmt = stmt.where(Video.original_name.ilike(f"%{q}%"))
+    result = db.execute(stmt).scalar()
+    return result or 0
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(
     request: Request,
@@ -379,9 +828,22 @@ def index(
     tags: str | None = None,
     q: str | None = None,
     untagged: bool = False,
+    page: int = 1,
 ):
     tag_ids = _tag_ids_from_csv(tags)
-    videos = list(db.execute(_video_query(db, tag_ids=tag_ids, q=q, untagged=untagged)).unique().scalars())
+    total = _video_count(db, tag_ids=tag_ids, q=q, untagged=untagged)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PAGE_SIZE
+    videos = list(
+        db.execute(
+            _video_query(db, tag_ids=tag_ids, q=q, untagged=untagged)
+            .offset(offset)
+            .limit(PAGE_SIZE)
+        )
+        .unique()
+        .scalars()
+    )
     return templates.TemplateResponse(
         "index.html",
         {
@@ -393,15 +855,52 @@ def index(
             "selected_tag_ids": tag_ids,
             "q": q or "",
             "untagged_filter": untagged,
+            "page": page,
+            "total_pages": total_pages,
+            "total_videos": total,
         },
     )
 
 
 def _do_transcode(video_id: int, original_path: Path) -> None:
     if not get_setting("transcode_to_720p", True):
+        logger.info("Transcode disabled by settings, skipping video %s", video_id)
         return
     if not video_needs_downscale(original_path):
+        logger.info("Video %s does not need downscale, skipping", video_id)
         return
+
+    _job_id: int | None = None
+    db = SessionLocal()
+    try:
+        job = TranscodeJob(video_id=video_id, status=TRANSCODE_STATUS_PENDING)
+        db.add(job)
+        db.commit()
+        _job_id = job.id
+    except Exception:
+        logger.exception("Failed to create transcode job for video %s", video_id)
+        db.close()
+        return
+    db.close()
+
+    if _job_id is None:
+        return
+    job_id = _job_id
+
+    db = SessionLocal()
+    try:
+        db_job = db.get(TranscodeJob, job_id)
+        if db_job:
+            db_job.status = TRANSCODE_STATUS_RUNNING
+            db_job.started_at = datetime.now(timezone.utc)
+            db.commit()
+    except Exception:
+        logger.exception("Failed to mark transcode job %s as running", job_id)
+        db.close()
+        return
+    db.close()
+
+    logger.info("Starting transcode for video %s -> job %s", video_id, job_id)
 
     display_name = original_path.stem + "_720p.mp4"
     out_name = unique_storage_name(display_name, ext_override=".mp4")
@@ -413,24 +912,94 @@ def _do_transcode(video_id: int, original_path: Path) -> None:
         if original_fps >= TRANSCODE_DOWNSCALE_FPS:
             target_fps = TRANSCODE_DOWNSCALE_FPS
 
-    if not transcode_to_h264(
+    ok = transcode_to_h264(
         original_path,
         out_dest,
         video_id,
         downscale_height=TRANSCODE_DOWNSCALE_HEIGHT,
         target_fps=target_fps,
-    ):
+    )
+
+    if not ok:
+        logger.warning("Transcode failed for video %s", video_id)
+        db = SessionLocal()
+        try:
+            db_job = db.get(TranscodeJob, job_id)
+            if db_job:
+                db_job.status = TRANSCODE_STATUS_FAILED
+                db_job.finished_at = datetime.now(timezone.utc)
+                db.commit()
+        except Exception:
+            logger.exception("Failed to update transcode job %s as failed", job_id)
+        finally:
+            db.close()
         return
+
+    logger.info("Transcode complete for video %s -> %s", video_id, out_name)
 
     db = SessionLocal()
     try:
         video = db.get(Video, video_id)
+        db_job = db.get(TranscodeJob, job_id)
         if video:
             video.filename_720p = out_name
             db.add(video)
-            db.commit()
+        if db_job:
+            db_job.status = TRANSCODE_STATUS_DONE
+            db_job.finished_at = datetime.now(timezone.utc)
+        db.commit()
     except Exception:
         logger.exception("Failed to save transcode result for video %s", video_id)
+    finally:
+        db.close()
+
+
+def _enqueue_transcode(video_id: int, original_path: Path) -> None:
+    thread = threading.Thread(target=_do_transcode, args=(video_id, original_path), daemon=True)
+    thread.start()
+    logger.debug("Transcode thread started for video %s", video_id)
+
+
+def _resume_pending_transcodes() -> None:
+    db = SessionLocal()
+    try:
+        pending = list(
+            db.scalars(
+                select(TranscodeJob).where(
+                    TranscodeJob.status.in_([TRANSCODE_STATUS_PENDING, TRANSCODE_STATUS_RUNNING])
+                )
+            )
+        )
+        if pending:
+            logger.info("Resuming %d interrupted transcode jobs", len(pending))
+        for job in pending:
+            video = db.get(Video, job.video_id)
+            if video:
+                src = video_path(video.filename)
+                if src.exists():
+                    job.status = TRANSCODE_STATUS_PENDING
+                    job.progress = 0.0
+                    job.error = None
+                    db.flush()
+                    thread = threading.Thread(
+                        target=_do_transcode, args=(job.video_id, src), daemon=True
+                    )
+                    thread.start()
+                    logger.info("Resumed transcode job %s for video %s", job.id, job.video_id)
+                else:
+                    logger.warning(
+                        "Video file missing for pending transcode job %s, marking failed", job.id
+                    )
+                    job.status = TRANSCODE_STATUS_FAILED
+                    job.error = "Video file not found on disk"
+            else:
+                logger.warning(
+                    "Video not found for pending transcode job %s, removing", job.id
+                )
+                db.delete(job)
+        db.commit()
+    except Exception:
+        logger.exception("Failed to resume pending transcodes")
     finally:
         db.close()
 
@@ -519,10 +1088,12 @@ async def upload_video(
 
         created_ids.append(video.id)
 
+    logger.info("Uploaded %d file(s): %s", len(created_ids), [f.filename for f in files if f.filename])
+
     if thumb_pairs:
         background_tasks.add_task(_generate_all_thumbnails, thumb_pairs)
     for video_id, dest in transcode_args:
-        background_tasks.add_task(_do_transcode, video_id, dest)
+        _enqueue_transcode(video_id, dest)
     db.commit()
     ids_str = ",".join(str(x) for x in created_ids)
     return RedirectResponse(url=f"/upload/tags?ids={ids_str}", status_code=303)
@@ -697,6 +1268,7 @@ def delete_video(
     _delete_video_files_with_720p(video)
     db.delete(video)
     db.commit()
+    logger.info("Deleted video %s (%s)", video_id, video.original_name)
     return _redirect("/")
 
 
@@ -1052,10 +1624,10 @@ def _would_create_cycle(db: Session, folder_id: int, parent_id: int | None) -> b
     return False
 
 
-def _folder_videos(db: Session, folder: Folder):
+def _folder_videos_query(db: Session, folder: Folder):
     tag_ids = [t.id for t in folder.tags]
     if not tag_ids:
-        return []
+        return None
 
     matching_ids_q = (
         select(VideoTag.video_id)
@@ -1071,7 +1643,20 @@ def _folder_videos(db: Session, folder: Folder):
         .options(joinedload(Video.tags))
         .order_by(Video.created_at.desc())
     )
-    return list(db.execute(stmt).unique().scalars())
+    return stmt
+
+
+def _folder_videos(db: Session, folder: Folder, page: int = 1, page_size: int = 30) -> tuple[list[Video], int]:
+    stmt = _folder_videos_query(db, folder)
+    if stmt is None:
+        return [], 0
+    count_q = select(func.count()).select_from(stmt.subquery())
+    total = db.execute(count_q).scalar() or 0
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * page_size
+    videos = list(db.execute(stmt.offset(offset).limit(page_size)).unique().scalars())
+    return videos, total
 
 
 @app.get("/folders/{folder_id}", response_class=HTMLResponse)
@@ -1080,6 +1665,7 @@ def folder_view(
     folder_id: int,
     db: Annotated[Session, Depends(get_db)],
     user: UserHTML,
+    page: int = 1,
 ):
     folder = db.get(Folder, folder_id)
     if not folder:
@@ -1093,7 +1679,8 @@ def folder_view(
         .unique()
         .scalar_one()
     )
-    videos = _folder_videos(db, folder)
+    videos, total = _folder_videos(db, folder, page=page, page_size=PAGE_SIZE)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     return templates.TemplateResponse(
         "folder_view.html",
         {
@@ -1103,6 +1690,9 @@ def folder_view(
             "folder": folder,
             "videos": videos,
             "all_tags": _all_tags(db),
+            "page": page,
+            "total_pages": total_pages,
+            "total_videos": total,
         },
     )
 
@@ -1149,71 +1739,75 @@ def library_import(
     _: AdminUserHTML,
     file: UploadFile = File(...),
 ):
-    raw = file.file.read()
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
     try:
-        zf = zipfile.ZipFile(io.BytesIO(raw), "r")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid ZIP file")
+        shutil.copyfileobj(file.file, tmp)
+        tmp.close()
 
-    if "library.json" not in zf.namelist():
-        raise HTTPException(status_code=400, detail="ZIP must contain library.json")
+        with zipfile.ZipFile(tmp.name, "r") as zf:
+            if "library.json" not in zf.namelist():
+                raise HTTPException(status_code=400, detail="ZIP must contain library.json")
 
-    try:
-        items = json.loads(zf.read("library.json"))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid library.json in archive")
+            try:
+                items = json.loads(zf.read("library.json"))
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid library.json in archive")
 
-    if not isinstance(items, list):
-        items = [items]
+            if not isinstance(items, list):
+                items = [items]
 
-    ensure_dirs()
-    imported = 0
-    skipped = 0
+            ensure_dirs()
+            imported = 0
+            skipped = 0
 
-    for item in items:
-        raw_filename = item.get("filename") or ""
-        filename = Path(raw_filename).name
-        if not filename:
-            skipped += 1
-            continue
+            for item in items:
+                raw_filename = item.get("filename") or ""
+                filename = Path(raw_filename).name
+                if not filename:
+                    skipped += 1
+                    continue
 
-        existing = db.scalar(select(Video).where(Video.filename == filename))
-        if existing:
-            skipped += 1
-            continue
+                existing = db.scalar(select(Video).where(Video.filename == filename))
+                if existing:
+                    skipped += 1
+                    continue
 
-        dest = video_path(filename)
-        if raw_filename in zf.namelist():
-            with dest.open("wb") as f:
-                f.write(zf.read(raw_filename))
-        else:
-            skipped += 1
-            continue
+                dest = video_path(filename)
+                if raw_filename in zf.namelist():
+                    with dest.open("wb") as f:
+                        f.write(zf.read(raw_filename))
+                else:
+                    skipped += 1
+                    continue
 
-        video = Video(
-            filename=filename,
-            filename_720p=item.get("filename_720p"),
-            original_name=item.get("original_name", filename),
-            content_type=item.get("content_type", "application/octet-stream"),
-            size_bytes=item.get("size_bytes", dest.stat().st_size),
-        )
-        db.add(video)
-        db.flush()
-
-        for tag_item in item.get("tags", []):
-            name = tag_item.get("name")
-            if not name:
-                continue
-            tag = db.scalar(select(Tag).where(Tag.name == name))
-            if not tag:
-                tag = Tag(name=name, description=tag_item.get("description"))
-                db.add(tag)
+                video = Video(
+                    filename=filename,
+                    filename_720p=item.get("filename_720p"),
+                    original_name=item.get("original_name", filename),
+                    content_type=item.get("content_type", "application/octet-stream"),
+                    size_bytes=item.get("size_bytes", dest.stat().st_size),
+                )
+                db.add(video)
                 db.flush()
-            video.tags.append(tag)
 
-        imported += 1
+                for tag_item in item.get("tags", []):
+                    name = tag_item.get("name")
+                    if not name:
+                        continue
+                    tag = db.scalar(select(Tag).where(Tag.name == name))
+                    if not tag:
+                        tag = Tag(name=name, description=tag_item.get("description"))
+                        db.add(tag)
+                        db.flush()
+                    video.tags.append(tag)
 
-    zf.close()
+                imported += 1
+
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
     db.commit()
     return _redirect(f"/?imported={imported}&skipped={skipped}")
 
@@ -1245,6 +1839,7 @@ def settings_save(
     if default_volume is not None:
         settings["default_volume"] = max(0.0, min(1.0, default_volume))
     save_settings(settings)
+    logger.info("Settings saved: %s", settings)
     return RedirectResponse(url="/settings", status_code=303)
 
 

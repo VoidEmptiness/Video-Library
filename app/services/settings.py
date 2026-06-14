@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import tempfile
 from pathlib import Path
+
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 
 
 _SETTINGS_DIR = Path(os.getenv("SETTINGS_DIR", str(Path(__file__).resolve().parent.parent / "data")))
@@ -41,11 +46,13 @@ def save_settings(settings: dict) -> None:
     data = json.dumps(merged, indent=2, ensure_ascii=False)
     tmp = tempfile.NamedTemporaryFile(dir=str(_SETTINGS_DIR), suffix=".tmp", delete=False, mode="w", encoding="utf-8")
     try:
-        fcntl.flock(tmp.fileno(), fcntl.LOCK_EX)
+        if HAS_FCNTL:
+            fcntl.flock(tmp.fileno(), fcntl.LOCK_EX)
         tmp.write(data)
         tmp.flush()
         os.fsync(tmp.fileno())
-        fcntl.flock(tmp.fileno(), fcntl.LOCK_UN)
+        if HAS_FCNTL:
+            fcntl.flock(tmp.fileno(), fcntl.LOCK_UN)
         tmp.close()
         os.replace(tmp.name, str(_SETTINGS_FILE))
     except Exception:

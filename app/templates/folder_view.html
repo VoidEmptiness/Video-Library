@@ -86,7 +86,7 @@
   <section class="section-block">
     <div class="section-title">
       <h2>Видео</h2>
-      <span>{{ videos|length }}</span>
+      <span>{{ total_videos }}</span>
     </div>
 
     {% if videos|length == 0 %}
@@ -117,6 +117,19 @@
           </a>
         {% endfor %}
       </div>
+      {% if total_pages > 1 %}
+      <div class="pagination">
+        <span class="pagination-info">Страница {{ page }} из {{ total_pages }} ({{ total_videos }} видео)</span>
+        <div class="pagination-links">
+          {% if page > 1 %}
+          <a class="button secondary compact" href="?page={{ page - 1 }}">← Назад</a>
+          {% endif %}
+          {% if page < total_pages %}
+          <a class="button secondary compact" href="?page={{ page + 1 }}">Вперёд →</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
     {% endif %}
   </section>
 {% endblock %}

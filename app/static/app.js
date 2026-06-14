@@ -1223,6 +1223,35 @@ function wireCustomValidation() {
   });
 }
 
+function wireTranscodePolling() {
+  const indicators = document.querySelectorAll("[data-transcode-indicator]");
+  if (!indicators.length) return;
+  indicators.forEach((el) => {
+    const videoId = el.dataset.transcodeIndicator;
+    if (!videoId) return;
+    const poll = () => {
+      fetch(`/transcode/status/${videoId}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.status === "running" || data.status === "pending") {
+            el.hidden = false;
+            el.title = data.text || "Транскодирование...";
+            setTimeout(poll, 3000);
+          } else {
+            el.hidden = true;
+            if (data.status === "done") {
+              window.location.reload();
+            }
+          }
+        })
+        .catch(() => {
+          setTimeout(poll, 5000);
+        });
+    };
+    setTimeout(poll, 1000);
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireSearchForm();
   wireUntaggedFilter();
@@ -1242,4 +1271,5 @@ document.addEventListener("DOMContentLoaded", () => {
   wireFilePicker();
   wireDialogConfirms();
   wireCustomValidation();
+  wireTranscodePolling();
 });
