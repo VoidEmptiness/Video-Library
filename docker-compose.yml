@@ -3,6 +3,7 @@ services:
     build: .
     ports:
       - "${HOST_PORT:-7880}:8000"
+    restart: unless-stopped
     environment:
       DATABASE_URL: "sqlite:////data/app.db"
       VIDEO_DIR: "/data/videos"
