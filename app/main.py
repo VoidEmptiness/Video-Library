@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 APP_TITLE = os.getenv("APP_TITLE", "Video Library")
 MAX_FILES_PER_UPLOAD = int(os.getenv("MAX_FILES_PER_UPLOAD", "50"))
 THUMBNAIL_CONCURRENCY = int(os.getenv("THUMBNAIL_CONCURRENCY", "4"))
-PAGE_SIZE = int(os.getenv("PAGE_SIZE", "30"))
+PAGE_SIZE = int(os.getenv("PAGE_SIZE", "32"))
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
