@@ -1843,7 +1843,7 @@ def settings_save(
     return RedirectResponse(url="/settings", status_code=303)
 
 
-@app.post("/settings/reset-thumbnails")
+@app.post("/admin/reset-thumbnails")
 def reset_thumbnails(
     background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
@@ -1865,5 +1865,5 @@ def reset_thumbnails(
     db.commit()
     if thumb_pairs:
         background_tasks.add_task(_generate_all_thumbnails, thumb_pairs)
-    return RedirectResponse(url="/settings", status_code=303)
+    return RedirectResponse(url="/admin", status_code=303)
 
