@@ -274,11 +274,20 @@ html[data-theme="dark"] .brand-mark {
   min-width: 0;
 }
 
-.workspace-grid--guest {
-  grid-template-columns: 1fr;
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
+.guest-layout {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.guest-layout > .panel {
+  min-width: 280px;
+  max-width: 360px;
+}
+
+.guest-layout > .section-block {
+  margin-bottom: 0;
 }
 
 .panel,
@@ -1380,6 +1389,7 @@ html[data-theme="dark"] .video-card:hover {
   }
 
   .workspace-grid,
+  .guest-layout,
   .form-grid {
     grid-template-columns: 1fr;
   }

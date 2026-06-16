@@ -11,36 +11,70 @@
     </div>
   </section>
 
-  <section class="workspace-grid{% if user == 'guest' %} workspace-grid--guest{% endif %}">
-    {% if user != "guest" %}
-    <article class="panel upload-panel">
-      <div class="panel-title">
-        <h2>Загрузка</h2>
-        <p>Перетащите видео в область или выберите файлы вручную.</p>
+  {% if user == "guest" %}
+  <section class="guest-layout">
+    <section class="section-block">
+      <div class="section-title">
+        <h2>{% if untagged_filter %}Видео без тегов{% else %}Все видео{% endif %}</h2>
+        <div class="selection-actions">
+          <span>{{ total_videos }}</span>
+        </div>
       </div>
 
-      <div id="dropzone" class="dropzone">
-        <form id="uploadForm" method="post" action="/videos/upload" enctype="multipart/form-data">
-          <input id="fileInput" class="file-input" type="file" name="files" accept="video/*" multiple />
-          <div class="dropzone-inner">
-            <div class="drop-icon" aria-hidden="true">+</div>
-            <div>
-              <strong>Добавить видео</strong>
-              <span id="fileLabel">Файлы не выбраны</span>
-            </div>
-          </div>
-          <div class="toolbar">
-            <button id="chooseBtn" class="button secondary" type="button">Выбрать</button>
-            <button class="button" type="submit">Загрузить</button>
-          </div>
-        </form>
-        <div class="upload-progress" data-upload-progress hidden>
-          <div class="upload-progress-bar" data-upload-progress-bar></div>
+      {% if videos|length == 0 %}
+        <div class="empty-state">
+          {% if untagged_filter %}
+            <strong>Все видео уже размечены</strong>
+            <p>Видео без тегов не найдено. Можно снять фильтр и посмотреть всю медиатеку.</p>
+          {% else %}
+            <strong>Пока пусто</strong>
+            <p>Загрузите первое видео, и оно появится здесь с миниатюрой, тегами и быстрым переходом к плееру.</p>
+          {% endif %}
         </div>
-        <p id="uploadStatus" class="status"></p>
-      </div>
-    </article>
-    {% endif %}
+      {% else %}
+        <div class="video-grid">
+          {% for v in videos %}
+            <article class="video-card" data-select-card>
+              <a class="video-link" href="/videos/{{ v.id }}">
+                <div class="thumb">
+                  {% if v.thumbnail_path %}
+                    <img loading="lazy" src="/thumb/{{ v.id }}" alt="" />
+                  {% else %}
+                    <div class="thumb-placeholder">VIDEO</div>
+                  {% endif %}
+                </div>
+                <div class="video-meta">
+                  <strong title="{{ v.original_name }}">
+                    {{ v.original_name|short_name }}
+                    <span class="transcode-icon-inline" data-transcode-indicator="{{ v.id }}" hidden>⚙</span>
+                  </strong>
+                  <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
+                </div>
+              </a>
+              <div class="chips">
+                {% for t in v.tags %}
+                  <span class="chip"{% if t.description %} title="{{ t.description }}"{% endif %}>#{{ t.name }}</span>
+                {% endfor %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+
+        {% if total_pages > 1 %}
+        <div class="pagination">
+          <span class="pagination-info">Страница {{ page }} из {{ total_pages }} ({{ total_videos }} видео)</span>
+          <div class="pagination-links">
+            {% if page > 1 %}
+            <a class="button secondary compact" href="?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}">← Назад</a>
+            {% endif %}
+            {% if page < total_pages %}
+            <a class="button secondary compact" href="?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}">Вперёд →</a>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+      {% endif %}
+    </section>
 
     <article class="panel">
       <div class="panel-title">
@@ -77,7 +111,74 @@
       </form>
     </article>
   </section>
+  {% else %}
+  <section class="workspace-grid">
+    <article class="panel upload-panel">
+      <div class="panel-title">
+        <h2>Загрузка</h2>
+        <p>Перетащите видео в область или выберите файлы вручную.</p>
+      </div>
 
+      <div id="dropzone" class="dropzone">
+        <form id="uploadForm" method="post" action="/videos/upload" enctype="multipart/form-data">
+          <input id="fileInput" class="file-input" type="file" name="files" accept="video/*" multiple />
+          <div class="dropzone-inner">
+            <div class="drop-icon" aria-hidden="true">+</div>
+            <div>
+              <strong>Добавить видео</strong>
+              <span id="fileLabel">Файлы не выбраны</span>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button id="chooseBtn" class="button secondary" type="button">Выбрать</button>
+            <button class="button" type="submit">Загрузить</button>
+          </div>
+        </form>
+        <div class="upload-progress" data-upload-progress hidden>
+          <div class="upload-progress-bar" data-upload-progress-bar></div>
+        </div>
+        <p id="uploadStatus" class="status"></p>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-title">
+        <h2>Фильтр</h2>
+        <p>Поиск по имени файла и выбранным тегам.</p>
+      </div>
+
+      <form method="get" action="/" class="form-stack">
+        <label class="field">
+          <span>Имя файла</span>
+          <input name="q" value="{{ q }}" placeholder="Например: vacation" />
+        </label>
+
+        <div class="field">
+          <span>Теги</span>
+          <label class="filter-option">
+            <input type="checkbox" name="untagged" value="1" data-untagged-filter {% if untagged_filter %}checked{% endif %} />
+            <span>Показать только видео без тегов</span>
+          </label>
+          <div class="tags">
+            {% for t in all_tags %}
+              <label class="pill"{% if t.description %} title="{{ t.description }}"{% endif %}>
+                <input type="checkbox" name="tag" value="{{ t.id }}" {% if t.id in selected_tag_ids %}checked{% endif %}/>
+                <span>#{{ t.name }}</span>
+              </label>
+            {% endfor %}
+            {% if all_tags|length == 0 %}
+              <span class="empty-inline">Теги пока не созданы</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <button class="button" type="submit">Применить фильтр</button>
+      </form>
+    </article>
+  </section>
+  {% endif %}
+
+  {% if user != "guest" %}
   <section class="section-block">
     <div class="section-title">
       <h2>{% if untagged_filter %}Видео без тегов{% else %}Все видео{% endif %}</h2>
@@ -198,4 +299,5 @@
       </div>
     {% endif %}
   </section>
+  {% endif %}
 {% endblock %}
