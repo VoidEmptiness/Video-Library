@@ -296,6 +296,44 @@ html[data-theme="dark"] .brand-mark {
   margin-bottom: 20px;
 }
 
+.upload-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.upload-panel .dropzone {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: 1fr auto auto;
+}
+
+.upload-panel .dropzone form {
+  height: 100%;
+  align-content: center;
+  justify-items: center;
+}
+
+.upload-panel .dropzone .toolbar {
+  margin-bottom: 0;
+  justify-content: center;
+}
+
+.upload-panel .dropzone .dropzone-inner {
+  justify-content: center;
+}
+
+.upload-panel .dropzone .dropzone-inner div {
+  text-align: center;
+}
+
+.upload-panel .dropzone .dropzone-inner strong {
+  font-size: 20px;
+}
+
+.upload-panel .dropzone .dropzone-inner span {
+  font-size: 16px;
+}
+
 .compact-panel {
   margin-bottom: 20px;
 }
