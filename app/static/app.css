@@ -587,6 +587,32 @@ html[data-theme="dark"] .brand-mark {
   flex-wrap: wrap;
 }
 
+.panel .tags {
+  max-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  align-content: flex-start;
+}
+
+.panel .tags::-webkit-scrollbar {
+  width: 6px;
+}
+
+.panel .tags::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel .tags::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+
+.panel .tags::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
 .pill,
 .chip {
   display: inline-flex;
