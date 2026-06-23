@@ -853,6 +853,7 @@ def index(
             "videos": videos,
             "all_tags": _all_tags(db),
             "selected_tag_ids": tag_ids,
+            "tags": tags or "",
             "q": q or "",
             "untagged_filter": untagged,
             "page": page,
