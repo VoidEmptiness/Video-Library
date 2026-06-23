@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -37,7 +37,6 @@ class Video(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     filename: Mapped[str] = mapped_column(String(255))
-    filename_720p: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_name: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
@@ -70,25 +69,6 @@ class Tag(Base):
         secondary="folder_tags",
         back_populates="tags",
     )
-
-
-TRANSCODE_STATUS_PENDING = "pending"
-TRANSCODE_STATUS_RUNNING = "running"
-TRANSCODE_STATUS_DONE = "done"
-TRANSCODE_STATUS_FAILED = "failed"
-
-
-class TranscodeJob(Base):
-    __tablename__ = "transcode_jobs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    video_id: Mapped[int] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), index=True, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), default=TRANSCODE_STATUS_PENDING, index=True)
-    progress: Mapped[float] = mapped_column(Float, default=0.0)
-    error: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Folder(Base):

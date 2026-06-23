@@ -116,15 +116,6 @@ def video_height(input_path: Path) -> int | None:
         return None
 
 
-def video_needs_downscale(input_path: Path) -> bool:
-    if not TRANSCODE_ENABLED:
-        return False
-    h = video_height(input_path)
-    if h is None:
-        return False
-    return h > TRANSCODE_DOWNSCALE_MAX_HEIGHT
-
-
 def get_progress_file(video_id: int) -> Path:
     PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
     return PROGRESS_DIR / f"{video_id}.txt"

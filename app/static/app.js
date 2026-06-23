@@ -743,37 +743,6 @@ function wireTagSearch() {
   }
 }
 
-function wireQualitySwitch() {
-  const selector = document.querySelector("[data-quality-switch]");
-  if (!selector) return;
-  const video = document.querySelector("video.player");
-  if (!video) return;
-
-  let currentTime = 0;
-  let wasPlaying = false;
-
-  selector.addEventListener("change", () => {
-    const quality = selector.value;
-    const sources = Array.from(video.querySelectorAll("source[data-quality]"));
-
-    currentTime = video.currentTime;
-    wasPlaying = !video.paused;
-
-    const target = sources.find((s) => s.dataset.quality === quality);
-    if (!target) return;
-
-    video.src = target.src;
-    const restore = () => {
-      video.currentTime = currentTime;
-      video.removeEventListener("loadedmetadata", restore);
-      if (wasPlaying) {
-        video.play().catch(() => {});
-      }
-    };
-    video.addEventListener("loadedmetadata", restore, { once: true });
-  });
-}
-
 function wireVolumeSlider() {
   const slider = document.querySelector("[data-volume-slider]");
   const label = document.querySelector("[data-volume-label]");
@@ -1223,35 +1192,6 @@ function wireCustomValidation() {
   });
 }
 
-function wireTranscodePolling() {
-  const indicators = document.querySelectorAll("[data-transcode-indicator]");
-  if (!indicators.length) return;
-  indicators.forEach((el) => {
-    const videoId = el.dataset.transcodeIndicator;
-    if (!videoId) return;
-    const poll = () => {
-      fetch(`/transcode/status/${videoId}`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.status === "running" || data.status === "pending") {
-            el.hidden = false;
-            el.title = data.text || "Транскодирование...";
-            setTimeout(poll, 3000);
-          } else {
-            el.hidden = true;
-            if (data.status === "done") {
-              window.location.reload();
-            }
-          }
-        })
-        .catch(() => {
-          setTimeout(poll, 5000);
-        });
-    };
-    setTimeout(poll, 1000);
-  });
-}
-
 document.addEventListener("DOMContentLoaded", () => {
   wireSearchForm();
   wireUntaggedFilter();
@@ -1263,7 +1203,6 @@ document.addEventListener("DOMContentLoaded", () => {
   wireVideoPlayerShortcuts();
   wireVideoMeta();
   wireFolderToggles();
-  wireQualitySwitch();
   wireVolumeSlider();
   applyDefaultVolume();
   wireCustomControls();
@@ -1271,5 +1210,4 @@ document.addEventListener("DOMContentLoaded", () => {
   wireFilePicker();
   wireDialogConfirms();
   wireCustomValidation();
-  wireTranscodePolling();
 });

@@ -44,10 +44,9 @@
                   {% endif %}
                 </div>
                 <div class="video-meta">
-                  <strong title="{{ v.original_name }}">
-                    {{ v.original_name|short_name }}
-                    <span class="transcode-icon-inline" data-transcode-indicator="{{ v.id }}" hidden>⚙</span>
-                  </strong>
+                    <strong title="{{ v.original_name }}">
+                      {{ v.original_name|short_name }}
+                    </strong>
                   <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
                 </div>
               </a>
@@ -233,10 +232,9 @@
                   {% endif %}
                 </div>
                 <div class="video-meta">
-                  <strong title="{{ v.original_name }}">
-                    {{ v.original_name|short_name }}
-                    <span class="transcode-icon-inline" data-transcode-indicator="{{ v.id }}" hidden>⚙</span>
-                  </strong>
+                    <strong title="{{ v.original_name }}">
+                      {{ v.original_name|short_name }}
+                    </strong>
                   <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
                 </div>
               </a>

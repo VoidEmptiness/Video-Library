@@ -30,30 +30,6 @@
       </p>
     </section>
 
-    <section class="section-block">
-      <div class="panel-title">
-        <h2>Транскодирование видео</h2>
-        <p>Настройки автоматического перекодирования при загрузке видео.</p>
-      </div>
-
-      <label class="switch-row">
-        <input type="hidden" name="transcode_to_720p" value="0" />
-        <input type="checkbox" name="transcode_to_720p" value="1" {% if transcode_to_720p %}checked{% endif %} />
-        <span>Перекодировать видео в 720p</span>
-        {% if transcode_to_720p %}
-          <span class="chip chip-end">Включено</span>
-        {% else %}
-          <span class="chip chip-end chip-off">Отключено</span>
-        {% endif %}
-      </label>
-      <p class="status">
-        {% if transcode_to_720p %}
-          При загрузке видео с разрешением выше 1080p будет автоматически создана 720p-копия.
-        {% else %}
-          720p-копия не будет создаваться. Видео будет доступно только в оригинальном качестве.
-        {% endif %}
-      </p>
-    </section>
 
     <div class="toolbar">
       <button class="button" type="submit">Сохранить</button>

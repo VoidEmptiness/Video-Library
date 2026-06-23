@@ -16,7 +16,6 @@ _SETTINGS_DIR = Path(os.getenv("SETTINGS_DIR", str(Path(__file__).resolve().pare
 _SETTINGS_FILE = _SETTINGS_DIR / "settings.json"
 
 _DEFAULT_SETTINGS = {
-    "transcode_to_720p": True,
     "default_volume": 1.0,
 }
 

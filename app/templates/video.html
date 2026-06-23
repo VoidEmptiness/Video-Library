@@ -3,14 +3,11 @@
   <section class="page-head">
     <div>
       <p class="eyebrow">Просмотр</p>
-      <h1 title="{{ video.original_name }}">{{ video.original_name|short_name }}<span class="transcode-icon-inline transcode-icon-video" data-transcode-indicator="{{ video.id }}" hidden>⚙</span></h1>
+      <h1 title="{{ video.original_name }}">{{ video.original_name|short_name }}</h1>
     </div>
     <div class="page-actions">
       {% if user != "guest" %}
       <a href="/download/{{ video.id }}" class="button secondary" download>Скачать</a>
-      {% if has_720p %}
-      <a href="/download/720p/{{ video.id }}" class="button secondary" download>Скачать 720p</a>
-      {% endif %}
       <form method="post" action="/videos/{{ video.id }}/delete" data-confirm="Удалить видео?">
         <button class="button danger" type="submit">Удалить</button>
       </form>
@@ -22,10 +19,7 @@
     <input type="hidden" data-default-volume value="{{ default_volume }}" />
     <div class="player-wrapper" data-player-wrapper>
       <video class="player" preload="auto">
-        <source src="/media/{{ video.id }}" type="{{ video.content_type }}" data-quality="original" />
-        {% if has_720p %}
-        <source src="/media/720p/{{ video.id }}" type="video/mp4" data-quality="720p" />
-        {% endif %}
+        <source src="/media/{{ video.id }}" type="{{ video.content_type }}" />
       </video>
 
       <div class="player-controls" data-player-controls>
@@ -56,13 +50,6 @@
             </button>
             <input type="range" class="pc-vol-slider" data-pc-vol-slider min="0" max="1" step="0.01" value="1" aria-label="Volume" />
           </div>
-
-          {% if has_720p %}
-          <select class="pc-quality" data-quality-switch data-video-id="{{ video.id }}" aria-label="Quality">
-            <option value="original">Оригинал</option>
-            <option value="720p">720p</option>
-          </select>
-          {% endif %}
 
           <button type="button" class="pc-btn pc-fullscreen" data-pc-fullscreen aria-label="Fullscreen">
             <svg class="pc-fs-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>

@@ -3,10 +3,8 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import threading
-from datetime import datetime, timezone
-import os
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -26,35 +24,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from .database import SessionLocal, engine, get_db
-from .models import (
-    TRANSCODE_STATUS_DONE,
-    TRANSCODE_STATUS_FAILED,
-    TRANSCODE_STATUS_PENDING,
-    TRANSCODE_STATUS_RUNNING,
-    Base,
-    Folder,
-    Tag,
-    TranscodeJob,
-    Video,
-    VideoTag,
-)
+from .models import Base, Folder, Tag, Video, VideoTag
 from .services.auth import GUEST_USER, SESSION_COOKIE, create_session_token, is_guest, parse_session_token, session_expiry_dt, verify_credentials
 from .services.storage import THUMB_DIR, ensure_dirs, unique_storage_name, video_path
 
 DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).parent.parent / "_data")))
 from .services.thumbnails import generate_thumbnail
 from .services.settings import get_setting, load_settings, save_settings
-from .services.transcoding import (
-    FFPROBE_EXE,
-    TRANSCODE_DOWNSCALE_FPS,
-    TRANSCODE_DOWNSCALE_HEIGHT,
-    ffprobe_available,
-    get_progress_file,
-    transcode_to_h264,
-    video_fps,
-    video_height,
-    video_needs_downscale,
-)
+from .services.transcoding import FFPROBE_EXE, ffprobe_available
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +62,6 @@ async def _lifespan(app: FastAPI):
     ensure_dirs()
     init_db()
     logger.info("DB initialized")
-    _resume_pending_transcodes()
     yield
     logger.info("Shutting down %s", APP_TITLE)
 
@@ -113,11 +89,6 @@ def _migrate_db() -> None:
     from sqlalchemy import inspect, text
     try:
         inspector = inspect(engine)
-        tables = inspector.get_table_names()
-        if "transcode_jobs" not in tables:
-            TranscodeJob.__table__.create(engine)
-            logger.info("Created transcode_jobs table")
-
         columns = [col["name"] for col in inspector.get_columns("folders")]
         if "parent_id" not in columns:
             with engine.connect() as conn:
@@ -211,19 +182,6 @@ def _delete_video_files(path: Path, thumb: Path | None) -> None:
             thumb.unlink()
     except Exception as e:
         logger.warning("Failed to delete thumbnail %s: %s", thumb, e)
-
-
-def _delete_video_files_with_720p(video: Video) -> None:
-    path = video_path(video.filename)
-    thumb = Path(video.thumbnail_path) if video.thumbnail_path else None
-    _delete_video_files(path, thumb)
-    if video.filename_720p:
-        try:
-            p = video_path(video.filename_720p)
-            if p.exists():
-                p.unlink()
-        except Exception as e:
-            logger.warning("Failed to delete 720p file %s: %s", video.filename_720p, e)
 
 
 def _probe_video_metadata(path: Path) -> tuple[str | None, float | None, int | None, int | None]:
@@ -505,21 +463,12 @@ def _rmtree(path: Path):
 
 
 def _delete_video_by_filename(db: Session, name: str) -> None:
-    video = db.query(Video).filter(
-        (Video.filename == name) | (Video.filename_720p == name)
-    ).first()
+    video = db.query(Video).filter(Video.filename == name).first()
     if video is None:
         return
-    # remove video file
     vpath = video_path(video.filename)
     if vpath.exists():
         vpath.unlink()
-    # remove 720p
-    if video.filename_720p:
-        p720 = video_path(video.filename_720p)
-        if p720.exists():
-            p720.unlink()
-    # remove thumbnail
     thumb = THUMB_DIR / f"{video.id}.jpg"
     if thumb.exists():
         thumb.unlink()
@@ -682,33 +631,6 @@ def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | 
     return start, end
 
 
-@app.get("/transcode/status/{video_id}")
-def transcode_status(
-    video_id: int,
-    db: Annotated[Session, Depends(get_db)],
-    _: User,
-):
-    job = db.scalar(
-        select(TranscodeJob)
-        .where(TranscodeJob.video_id == video_id)
-        .order_by(TranscodeJob.id.desc())
-        .limit(1)
-    )
-    if not job:
-        return {"status": None}
-    if job.status == TRANSCODE_STATUS_RUNNING:
-        progress_file = get_progress_file(video_id)
-        if progress_file.exists():
-            try:
-                text = progress_file.read_text().strip()
-                if text and "\n" in text:
-                    percent, status_text = text.split("\n", 1)
-                    return {"status": job.status, "percent": float(percent), "text": status_text}
-            except Exception:
-                pass
-    return {"status": job.status, "percent": getattr(job, "progress", 0)}
-
-
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
@@ -863,148 +785,6 @@ def index(
     )
 
 
-def _do_transcode(video_id: int, original_path: Path) -> None:
-    if not get_setting("transcode_to_720p", True):
-        logger.info("Transcode disabled by settings, skipping video %s", video_id)
-        return
-    if not video_needs_downscale(original_path):
-        logger.info("Video %s does not need downscale, skipping", video_id)
-        return
-
-    _job_id: int | None = None
-    db = SessionLocal()
-    try:
-        job = TranscodeJob(video_id=video_id, status=TRANSCODE_STATUS_PENDING)
-        db.add(job)
-        db.commit()
-        _job_id = job.id
-    except Exception:
-        logger.exception("Failed to create transcode job for video %s", video_id)
-        db.close()
-        return
-    db.close()
-
-    if _job_id is None:
-        return
-    job_id = _job_id
-
-    db = SessionLocal()
-    try:
-        db_job = db.get(TranscodeJob, job_id)
-        if db_job:
-            db_job.status = TRANSCODE_STATUS_RUNNING
-            db_job.started_at = datetime.now(timezone.utc)
-            db.commit()
-    except Exception:
-        logger.exception("Failed to mark transcode job %s as running", job_id)
-        db.close()
-        return
-    db.close()
-
-    logger.info("Starting transcode for video %s -> job %s", video_id, job_id)
-
-    display_name = original_path.stem + "_720p.mp4"
-    out_name = unique_storage_name(display_name, ext_override=".mp4")
-    out_dest = video_path(out_name)
-
-    target_fps = None
-    original_fps = video_fps(original_path)
-    if original_fps is not None:
-        if original_fps >= TRANSCODE_DOWNSCALE_FPS:
-            target_fps = TRANSCODE_DOWNSCALE_FPS
-
-    ok = transcode_to_h264(
-        original_path,
-        out_dest,
-        video_id,
-        downscale_height=TRANSCODE_DOWNSCALE_HEIGHT,
-        target_fps=target_fps,
-    )
-
-    if not ok:
-        logger.warning("Transcode failed for video %s", video_id)
-        db = SessionLocal()
-        try:
-            db_job = db.get(TranscodeJob, job_id)
-            if db_job:
-                db_job.status = TRANSCODE_STATUS_FAILED
-                db_job.finished_at = datetime.now(timezone.utc)
-                db.commit()
-        except Exception:
-            logger.exception("Failed to update transcode job %s as failed", job_id)
-        finally:
-            db.close()
-        return
-
-    logger.info("Transcode complete for video %s -> %s", video_id, out_name)
-
-    db = SessionLocal()
-    try:
-        video = db.get(Video, video_id)
-        db_job = db.get(TranscodeJob, job_id)
-        if video:
-            video.filename_720p = out_name
-            db.add(video)
-        if db_job:
-            db_job.status = TRANSCODE_STATUS_DONE
-            db_job.finished_at = datetime.now(timezone.utc)
-        db.commit()
-    except Exception:
-        logger.exception("Failed to save transcode result for video %s", video_id)
-    finally:
-        db.close()
-
-
-def _enqueue_transcode(video_id: int, original_path: Path) -> None:
-    thread = threading.Thread(target=_do_transcode, args=(video_id, original_path), daemon=True)
-    thread.start()
-    logger.debug("Transcode thread started for video %s", video_id)
-
-
-def _resume_pending_transcodes() -> None:
-    db = SessionLocal()
-    try:
-        pending = list(
-            db.scalars(
-                select(TranscodeJob).where(
-                    TranscodeJob.status.in_([TRANSCODE_STATUS_PENDING, TRANSCODE_STATUS_RUNNING])
-                )
-            )
-        )
-        if pending:
-            logger.info("Resuming %d interrupted transcode jobs", len(pending))
-        for job in pending:
-            video = db.get(Video, job.video_id)
-            if video:
-                src = video_path(video.filename)
-                if src.exists():
-                    job.status = TRANSCODE_STATUS_PENDING
-                    job.progress = 0.0
-                    job.error = None
-                    db.flush()
-                    thread = threading.Thread(
-                        target=_do_transcode, args=(job.video_id, src), daemon=True
-                    )
-                    thread.start()
-                    logger.info("Resumed transcode job %s for video %s", job.id, job.video_id)
-                else:
-                    logger.warning(
-                        "Video file missing for pending transcode job %s, marking failed", job.id
-                    )
-                    job.status = TRANSCODE_STATUS_FAILED
-                    job.error = "Video file not found on disk"
-            else:
-                logger.warning(
-                    "Video not found for pending transcode job %s, removing", job.id
-                )
-                db.delete(job)
-        db.commit()
-    except Exception:
-        logger.exception("Failed to resume pending transcodes")
-    finally:
-        db.close()
-
-
 async def _generate_all_thumbnails(pairs: list[tuple[int, Path]]) -> None:
     sem = asyncio.Semaphore(THUMBNAIL_CONCURRENCY)
 
@@ -1049,7 +829,6 @@ async def upload_video(
     ensure_dirs()
     created_ids: list[int] = []
     thumb_pairs: list[tuple[int, Path]] = []
-    transcode_args: list[tuple[int, Path]] = []
 
     for file in files:
         if not file.filename:
@@ -1085,7 +864,6 @@ async def upload_video(
         db.flush()
 
         thumb_pairs.append((video.id, dest))
-        transcode_args.append((video.id, dest))
 
         created_ids.append(video.id)
 
@@ -1093,8 +871,6 @@ async def upload_video(
 
     if thumb_pairs:
         background_tasks.add_task(_generate_all_thumbnails, thumb_pairs)
-    for video_id, dest in transcode_args:
-        _enqueue_transcode(video_id, dest)
     db.commit()
     ids_str = ",".join(str(x) for x in created_ids)
     return RedirectResponse(url=f"/upload/tags?ids={ids_str}", status_code=303)
@@ -1114,7 +890,6 @@ def video_page(
     codec_name, duration_seconds, video_width, video_height = _probe_video_metadata(media_path) if media_path.exists() else (None, None, None, None)
     resolution_label = f"{video_width}×{video_height}" if video_width and video_height else None
     codec_display = {"hevc": "H.265", "h264": "H.264", "h265": "H.265"}.get(codec_name, codec_name) if codec_name else None
-    has_720p = bool(video.filename_720p) and video_path(video.filename_720p).exists()
     default_volume = get_setting("default_volume", 1.0)
     if is_guest(user):
         default_volume = 0.01
@@ -1131,7 +906,6 @@ def video_page(
             "resolution_label": resolution_label,
             "video_width": video_width,
             "video_height": video_height,
-            "has_720p": has_720p,
             "default_volume": default_volume,
         },
     )
@@ -1172,21 +946,6 @@ def _stream_file(path: Path, media_type: str, request: Request) -> FileResponse 
     return StreamingResponse(iter_file(), status_code=206, media_type=media_type, headers=headers)
 
 
-@app.get("/media/720p/{video_id}")
-def media_stream_720p(
-    video_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    _: User,
-):
-    video = db.get(Video, video_id)
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    if not video.filename_720p:
-        raise HTTPException(status_code=404, detail="720p version not available")
-    return _stream_file(video_path(video.filename_720p), "video/mp4", request)
-
-
 @app.get("/media/{video_id}")
 def media_stream(
     video_id: int,
@@ -1219,29 +978,6 @@ def video_download(
     )
 
 
-@app.get("/download/720p/{video_id}")
-def video_download_720p(
-    video_id: int,
-    db: Annotated[Session, Depends(get_db)],
-    _: AdminUser,
-):
-    video = db.get(Video, video_id)
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    if not video.filename_720p:
-        raise HTTPException(status_code=404, detail="720p version not available")
-    path = video_path(video.filename_720p)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File missing on disk")
-    stem = PurePath(video.original_name).stem
-    download_name = f"{stem}_720p.mp4"
-    return FileResponse(
-        path=str(path),
-        media_type="application/octet-stream",
-        filename=download_name,
-    )
-
-
 @app.get("/thumb/{video_id}")
 def thumb_get(
     video_id: int,
@@ -1266,7 +1002,7 @@ def delete_video(
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    _delete_video_files_with_720p(video)
+    _delete_video_files(video_path(video.filename), Path(video.thumbnail_path) if video.thumbnail_path else None)
     db.delete(video)
     db.commit()
     logger.info("Deleted video %s (%s)", video_id, video.original_name)
@@ -1322,7 +1058,7 @@ def delete_selected_videos(
     videos = list(db.scalars(select(Video).where(Video.id.in_(video_ids))))
 
     for video in videos:
-        _delete_video_files_with_720p(video)
+        _delete_video_files(video_path(video.filename), Path(video.thumbnail_path) if video.thumbnail_path else None)
         db.delete(video)
     db.commit()
 
@@ -1719,7 +1455,6 @@ def library_export(
                 zf.write(str(src), video.filename)
             meta.append({
                 "filename": video.filename,
-                "filename_720p": video.filename_720p,
                 "original_name": video.original_name,
                 "content_type": video.content_type,
                 "size_bytes": video.size_bytes,
@@ -1783,7 +1518,6 @@ def library_import(
 
                 video = Video(
                     filename=filename,
-                    filename_720p=item.get("filename_720p"),
                     original_name=item.get("original_name", filename),
                     content_type=item.get("content_type", "application/octet-stream"),
                     size_bytes=item.get("size_bytes", dest.stat().st_size),
@@ -1824,7 +1558,6 @@ def settings_page(
         {
             "request": request,
             "title": f"{APP_TITLE} — Настройки",
-            "transcode_to_720p": settings.get("transcode_to_720p", True),
             "default_volume": settings.get("default_volume", 1.0),
         },
     )
@@ -1833,10 +1566,9 @@ def settings_page(
 @app.post("/settings")
 def settings_save(
     _: AdminUserHTML,
-    transcode_to_720p: Annotated[str | None, Form()] = None,
     default_volume: Annotated[float | None, Form()] = None,
 ):
-    settings = {"transcode_to_720p": transcode_to_720p == "1"}
+    settings = {}
     if default_volume is not None:
         settings["default_volume"] = max(0.0, min(1.0, default_volume))
     save_settings(settings)
