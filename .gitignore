@@ -1,36 +1,47 @@
-# Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+*.pyz
+__pypackages__/
 *.egg-info/
 dist/
 build/
 *.egg
+*.whl
 .venv/
 venv/
 env/
-
-# Environment
 .env
 *.local
-
-# IDE
+pip-log.txt
+pip-delete-this-directory.txt
+.python-version
+*.log
 .idea/
 .vscode/
+.project
+.pydevproject
 *.swp
 *.swo
-
-# OS
+*.swn
+*.swl
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
-
-# Transcoding progress files
+*.bak
+*.tmp
+*~
+*.orig
+.directory
+*.pid
 transcode_progress/
 app/transcode_progress/
-
-# Project specific
 /data/
 app/data/
-
-# Python
-*.log
-.python-version
+_data/
+*.db
+/tmp/
+/hls/

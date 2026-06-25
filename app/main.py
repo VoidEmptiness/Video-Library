@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import lru_cache
 import io
 import logging
 import json
@@ -8,6 +9,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import zipfile
 from contextlib import asynccontextmanager
@@ -15,7 +17,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from pathlib import PurePath
 from fastapi.staticfiles import StaticFiles
@@ -31,7 +33,7 @@ from .services.storage import THUMB_DIR, ensure_dirs, unique_storage_name, video
 DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).parent.parent / "_data")))
 from .services.thumbnails import generate_thumbnail
 from .services.settings import get_setting, load_settings, save_settings
-from .services.transcoding import FFPROBE_EXE, ffprobe_available
+from .services.transcoding import FFMPEG_EXE, FFPROBE_EXE, ffprobe_available, video_height
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +186,7 @@ def _delete_video_files(path: Path, thumb: Path | None) -> None:
         logger.warning("Failed to delete thumbnail %s: %s", thumb, e)
 
 
+@lru_cache(maxsize=256)
 def _probe_video_metadata(path: Path) -> tuple[str | None, float | None, int | None, int | None]:
     if not ffprobe_available():
         logger.warning("ffprobe not available, skipping metadata probe for %s", path)
@@ -864,13 +867,13 @@ async def upload_video(
         db.flush()
 
         thumb_pairs.append((video.id, dest))
-
         created_ids.append(video.id)
 
     logger.info("Uploaded %d file(s): %s", len(created_ids), [f.filename for f in files if f.filename])
 
     if thumb_pairs:
         background_tasks.add_task(_generate_all_thumbnails, thumb_pairs)
+
     db.commit()
     ids_str = ",".join(str(x) for x in created_ids)
     return RedirectResponse(url=f"/upload/tags?ids={ids_str}", status_code=303)
@@ -946,6 +949,426 @@ def _stream_file(path: Path, media_type: str, request: Request) -> FileResponse 
     return StreamingResponse(iter_file(), status_code=206, media_type=media_type, headers=headers)
 
 
+ALL_RENDITION_HEIGHTS = [240, 360, 480, 720, 1080]
+HLS_TEMP_DIR = Path(os.getenv("HLS_TEMP_DIR", "/tmp/hls"))
+
+def _valid_heights(video_height: int | None) -> list[int]:
+    if not video_height:
+        return list(ALL_RENDITION_HEIGHTS)
+    return [h for h in ALL_RENDITION_HEIGHTS if h <= video_height]
+
+HLS_BANDWIDTHS = {
+    240: 400_000,
+    360: 700_000,
+    480: 1_400_000,
+    720: 3_000_000,
+    1080: 6_000_000,
+}
+
+
+def _hls_dir(video_id: int, height: int, start_sec: int = 0) -> Path:
+    return HLS_TEMP_DIR / str(video_id) / f"{height}_{start_sec}"
+
+
+def _hls_playlist_path(video_id: int, height: int, start_sec: int = 0) -> Path:
+    return _hls_dir(video_id, height, start_sec) / "playlist.m3u8"
+
+
+_generation_tasks: dict[tuple[int, int, int], dict] = {}
+_generation_lock = threading.Lock()
+
+
+def _kill_ffmpeg_by_video(video_id: int) -> None:
+    pattern = f"{HLS_TEMP_DIR}/{video_id}/"
+    try:
+        subprocess.run(
+            ["pkill", "-f", pattern],
+            capture_output=True, timeout=5
+        )
+    except Exception:
+        try:
+            for p in Path("/proc").glob("*/cmdline"):
+                try:
+                    data = p.read_bytes().replace(b"\0", b" ")
+                    if b"ffmpeg" in data and pattern.encode() in data:
+                        os.kill(int(p.parent.name), 9)
+                except (ValueError, OSError):
+                    pass
+        except Exception:
+            pass
+
+
+def _run_ffmpeg(source_path: Path, video_id: int, height: int, start_sec: int = 0) -> None:
+    out_dir = _hls_dir(video_id, height, start_sec)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    seg_pattern = str(out_dir / "seg_%03d.ts")
+    playlist_path = str(out_dir / "playlist.m3u8")
+
+    cmd = [
+        str(FFMPEG_EXE), "-y",
+    ]
+    if start_sec > 0:
+        cmd += ["-ss", str(start_sec)]
+    cmd += [
+        "-i", str(source_path),
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "28",
+        "-threads", "0",
+        "-g", "30",
+        "-keyint_min", "30",
+        "-sc_threshold", "0",
+        "-vf", f"scale=-2:{height}",
+        "-sws_flags", "fast_bilinear",
+        "-profile:v", "main",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "64k",
+        "-sn",
+        "-f", "hls",
+        "-hls_time", "3",
+        "-hls_list_size", "0",
+        "-hls_playlist_type", "event",
+        "-hls_segment_filename", seg_pattern,
+        "-hls_flags", "independent_segments+temp_file",
+        playlist_path,
+    ]
+
+    logger.info("Starting HLS: %s (%dp, start=%ds)", source_path.name, height, start_sec)
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with _generation_lock:
+            key = (video_id, height, start_sec)
+            if key not in _generation_tasks or _generation_tasks[key].get("done"):
+                proc.kill()
+                proc.wait(timeout=5)
+                return
+            _generation_tasks[key]["proc"] = proc
+        proc.wait(timeout=7200)
+        ok = proc.returncode == 0 and _hls_playlist_path(video_id, height, start_sec).exists()
+        if ok:
+            logger.info("HLS done: video %d (%dp, start=%d), %d segments", video_id, height, start_sec,
+                        len(list(out_dir.glob("seg_*.ts"))))
+    except Exception:
+        logger.exception("HLS failed for video %d (%dp, start=%d)", video_id, height, start_sec)
+        ok = False
+
+    with _generation_lock:
+        key = (video_id, height, start_sec)
+        if key in _generation_tasks:
+            _generation_tasks[key]["done"] = True
+            _generation_tasks[key]["success"] = ok
+
+
+def _kill_processes(video_id: int, same_start: int | None = None) -> list[tuple[int, int, int]]:
+    killed: list[tuple[int, int, int]] = []
+    with _generation_lock:
+        for key in list(_generation_tasks.keys()):
+            if key[0] != video_id:
+                continue
+            if same_start is not None and key[2] != same_start:
+                continue
+            task = _generation_tasks[key]
+            if task.get("done"):
+                continue
+            proc = task.get("proc")
+            if proc:
+                threading.Thread(
+                    target=lambda p: (p.kill(), p.wait(timeout=3)),
+                    args=(proc,), daemon=True
+                ).start()
+            task["done"] = True
+            killed.append(key)
+        for key in killed:
+            del _generation_tasks[key]
+    for _, h, s in killed:
+        d = _hls_dir(video_id, h, s)
+        if d.exists():
+            threading.Thread(
+                target=shutil.rmtree, args=(str(d),), kwargs={"ignore_errors": True}, daemon=True
+            ).start()
+    _kill_ffmpeg_by_video(video_id)
+    return killed
+
+
+def _ensure_hls_async(source_path: Path, video_id: int, height: int, start_sec: int = 0) -> bool:
+    playlist = _hls_playlist_path(video_id, height, start_sec)
+    if playlist.exists():
+        if _generation_active(video_id, height, start_sec):
+            return True
+        out_dir = _hls_dir(video_id, height, start_sec)
+        if any(out_dir.glob("seg_*.ts")):
+            return True
+        shutil.rmtree(str(out_dir), ignore_errors=True)
+
+    with _generation_lock:
+        for key in list(_generation_tasks.keys()):
+            if key[0] != video_id:
+                continue
+            task = _generation_tasks[key]
+            if task.get("done"):
+                continue
+            proc = task.get("proc")
+            if proc:
+                threading.Thread(
+                    target=lambda p: (p.kill(), p.wait(timeout=3)),
+                    args=(proc,), daemon=True
+                ).start()
+            task["done"] = True
+            d = _hls_dir(video_id, key[1], key[2])
+            if d.exists():
+                threading.Thread(
+                    target=shutil.rmtree, args=(str(d),), kwargs={"ignore_errors": True}, daemon=True
+                ).start()
+        _kill_ffmpeg_by_video(video_id)
+
+        key = (video_id, height, start_sec)
+        if key in _generation_tasks:
+            task = _generation_tasks[key]
+            if not task["done"]:
+                return True
+            del _generation_tasks[key]
+        thread = threading.Thread(
+            target=_run_ffmpeg, args=(source_path, video_id, height, start_sec), daemon=True
+        )
+        _generation_tasks[key] = {"done": False, "success": False, "thread": thread}
+        thread.start()
+        return True
+
+
+def _wait_for_playlist(video_id: int, height: int, start_sec: int = 0, timeout: int = 120) -> bool:
+    playlist = _hls_playlist_path(video_id, height, start_sec)
+    for _ in range(timeout):
+        if playlist.exists() and playlist.stat().st_size > 10:
+            return True
+        time.sleep(1)
+    return False
+
+
+def _generation_active(video_id: int, height: int, start_sec: int = 0) -> bool:
+    with _generation_lock:
+        key = (video_id, height, start_sec)
+        task = _generation_tasks.get(key)
+        if task and not task["done"]:
+            return True
+        return False
+
+
+def _cleanup_hls(video_id: int) -> None:
+    with _generation_lock:
+        for key in list(_generation_tasks.keys()):
+            if key[0] == video_id:
+                task = _generation_tasks[key]
+                if not task.get("done"):
+                    proc = task.get("proc")
+                    if proc:
+                        threading.Thread(
+                            target=lambda p: (p.kill(), p.wait(timeout=3)),
+                            args=(proc,), daemon=True
+                        ).start()
+                    task["done"] = True
+                del _generation_tasks[key]
+    d = HLS_TEMP_DIR / str(video_id)
+    if d.exists():
+        import shutil
+        shutil.rmtree(str(d), ignore_errors=True)
+
+
+@app.get("/videos/{video_id}/renditions")
+def list_renditions(
+    video_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    result = [
+        {
+            "height": 0,
+            "label": "Source",
+            "available": True,
+            "content_type": video.content_type or "video/mp4",
+        }
+    ]
+    for h in ALL_RENDITION_HEIGHTS:
+        result.append({
+            "height": h,
+            "label": f"{h}p",
+            "available": _hls_playlist_path(video_id, h).exists(),
+            "content_type": "application/vnd.apple.mpegurl",
+        })
+    return result
+
+
+@app.get("/hls/{video_id}/master.m3u8")
+def hls_master_playlist(
+    video_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+    start: int = Query(0),
+    height: int = Query(None),
+):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    source_path = video_path(video.filename)
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="Source missing")
+
+    _, _, _, video_height = _probe_video_metadata(source_path)
+    valid_heights = _valid_heights(video_height)
+    heights = [height] if height else [h for h in valid_heights if _hls_playlist_path(video_id, h, start).exists()]
+    if not heights:
+        raise HTTPException(status_code=404, detail="No renditions available")
+
+    lines = ["#EXTM3U"]
+    for h in heights:
+        if h not in valid_heights:
+            continue
+        bw = HLS_BANDWIDTHS.get(h, 500_000)
+        lines.append(f"#EXT-X-STREAM-INF:BANDWIDTH={bw},RESOLUTION={h*16//9}x{h}")
+        lines.append(f"{h}/{start}/playlist.m3u8")
+
+    lines.append("")
+    return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl")
+
+
+@app.get("/hls/{video_id}/{height}/{start}/playlist.m3u8")
+def hls_rendition_playlist(
+    video_id: int,
+    height: int,
+    start: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    source_path = video_path(video.filename)
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="Source missing")
+
+    _, _, _, video_height = _probe_video_metadata(source_path)
+    if height not in _valid_heights(video_height):
+        raise HTTPException(status_code=400, detail="Invalid height")
+
+    playlist_path = _hls_playlist_path(video_id, height, start)
+    if not playlist_path.exists():
+        if not _ensure_hls_async(source_path, video_id, height, start):
+            raise HTTPException(status_code=503, detail="Failed to start HLS generation")
+        if not _wait_for_playlist(video_id, height, start, timeout=120):
+            raise HTTPException(status_code=503, detail="HLS generation timeout")
+
+    _, duration_seconds, _, _ = _probe_video_metadata(source_path) if source_path.exists() else (None, None, None, None)
+    headers = {
+        "X-Original-Duration": str(duration_seconds or 0),
+        "X-Start-Sec": str(start),
+    }
+    return FileResponse(str(playlist_path), media_type="application/vnd.apple.mpegurl", headers=headers)
+
+
+@app.get("/hls/{video_id}/{height}/{start}/{filename}")
+async def hls_segment(
+    video_id: int,
+    height: int,
+    start: int,
+    filename: str,
+    _: User,
+):
+    seg_path = _hls_dir(video_id, height, start) / filename
+    if seg_path.exists():
+        return FileResponse(str(seg_path), media_type="video/MP2T")
+
+    if _generation_active(video_id, height, start):
+        for _ in range(120):
+            if seg_path.exists():
+                return FileResponse(str(seg_path), media_type="video/MP2T")
+            await asyncio.sleep(0.5)
+
+    raise HTTPException(status_code=404, detail="Segment not found")
+
+
+def _kill_hls(video_id: int) -> None:
+    with _generation_lock:
+        for key in list(_generation_tasks.keys()):
+            if key[0] == video_id:
+                task = _generation_tasks[key]
+                if not task.get("done"):
+                    proc = task.get("proc")
+                    if proc:
+                        threading.Thread(
+                            target=lambda p: (p.kill(), p.wait(timeout=3)),
+                            args=(proc,), daemon=True
+                        ).start()
+                    task["done"] = True
+                del _generation_tasks[key]
+    _kill_ffmpeg_by_video(video_id)
+
+
+@app.post("/videos/{video_id}/cleanup-hls")
+def cleanup_hls(
+    video_id: int,
+    _: User,
+):
+    _kill_hls(video_id)
+    return {"ok": True}
+
+
+async def _wait_for_playlist_async(video_id: int, height: int, start_sec: int = 0, timeout: int = 120) -> bool:
+    playlist = _hls_playlist_path(video_id, height, start_sec)
+    for _ in range(timeout):
+        if playlist.exists() and playlist.stat().st_size > 10:
+            return True
+        await asyncio.sleep(0.5)
+    return False
+
+
+@app.post("/hls/{video_id}/seek")
+async def hls_seek(
+    video_id: int,
+    body: Annotated[dict, Body()],
+    db: Annotated[Session, Depends(get_db)],
+    _: User,
+):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    source_path = video_path(video.filename)
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="Source missing")
+
+    height = int(body["height"])
+    old_start = int(body.get("start_sec", 0))
+    new_position = float(body["new_position"])
+
+    _, _, _, video_height = _probe_video_metadata(source_path)
+    if height not in _valid_heights(video_height):
+        raise HTTPException(status_code=400, detail="Invalid height")
+
+    new_start = max(0, int(new_position))
+
+    _kill_processes(video_id)
+
+    if not _ensure_hls_async(source_path, video_id, height, new_start):
+        raise HTTPException(status_code=503, detail="Failed to start HLS generation")
+    if not await _wait_for_playlist_async(video_id, height, new_start, timeout=120):
+        raise HTTPException(status_code=503, detail="HLS generation timeout")
+
+    _, duration_seconds, _, _ = _probe_video_metadata(source_path) if source_path.exists() else (None, None, None, None)
+
+    return {
+        "start_sec": new_start,
+        "original_duration": duration_seconds or 0,
+    }
+
+
 @app.get("/media/{video_id}")
 def media_stream(
     video_id: int,
@@ -1002,6 +1425,7 @@ def delete_video(
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
+    _cleanup_hls(video_id)
     _delete_video_files(video_path(video.filename), Path(video.thumbnail_path) if video.thumbnail_path else None)
     db.delete(video)
     db.commit()
@@ -1058,6 +1482,7 @@ def delete_selected_videos(
     videos = list(db.scalars(select(Video).where(Video.id.in_(video_ids))))
 
     for video in videos:
+        _cleanup_hls(video.id)
         _delete_video_files(video_path(video.filename), Path(video.thumbnail_path) if video.thumbnail_path else None)
         db.delete(video)
     db.commit()

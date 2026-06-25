@@ -19,6 +19,7 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="stylesheet" href="/static/app.css?{{ static_version }}" />
   <script defer src="/static/app.js?{{ static_version }}"></script>
+  {% block head_scripts %}{% endblock %}
 </head>
 <body>
   {% set path = request.url.path %}

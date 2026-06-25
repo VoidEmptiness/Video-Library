@@ -51,6 +51,8 @@ class Video(Base):
     )
 
 
+
+
 class Tag(Base):
     __tablename__ = "tags"
 
