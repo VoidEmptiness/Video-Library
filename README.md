@@ -12,7 +12,9 @@ git clone https://github.com/VoidEmptiness/Video-Library.git && cd Video-Library
 
 Открыть: `http://localhost:7880` или `http://локальный ip компа/сервера:7880`
 
-Логин/пароль по умолчанию: `admin` / `admin` Можно поменять в docker-compose.yml переменные ADMIN_USERNAME/ADMIN_PASSWORD
+При первом запуске откроется страница создания учётной записи администратора. Логин и пароль хранятся в БД в захэшированном виде.
+
+Для миграции существующих установок можно временно указать `ADMIN_USERNAME` и `ADMIN_PASSWORD` — при первом запуске они будут импортированы в БД, после чего переменные можно удалить.
 
 ## Переменные окружения
 
@@ -23,9 +25,9 @@ git clone https://github.com/VoidEmptiness/Video-Library.git && cd Video-Library
 | `VIDEO_DIR` | `/data/videos` | Директория для видеофайлов |
 | `THUMB_DIR` | `/data/thumbs` | Директория для миниатюр |
 | `AUTH_ENABLED` | `true` | Включить/выключить авторизацию |
-| `ADMIN_USERNAME` | `admin` | Логин |
-| `ADMIN_PASSWORD` | `admin` | Пароль |
-| `SECRET_KEY` | `change-me-in-production` | Ключ подписи сессионных токенов |
+| `ADMIN_USERNAME` | — | Логин (только для миграции существующих установок, опционально) |
+| `ADMIN_PASSWORD` | — | Пароль (только для миграции существующих установок, опционально) |
+| `SECRET_KEY` | авто-генерация | Ключ подписи сессионных токенов (опционально, если не задан — генерируется и сохраняется в `/data/secret_key`) |
 | `APP_TITLE` | `Video Library` | Название приложения в интерфейсе |
 
 | `THUMBNAIL_TIMEOUT_SECONDS` | `30` | Таймаут генерации миниатюры |

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Начальная настройка — {{ title }}</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <div class="brand auth-brand">
+        <span class="brand-mark">VL</span>
+        <span>
+          <strong>Video Library</strong>
+          <small>первоначальная настройка</small>
+        </span>
+      </div>
+
+      <div class="panel-title">
+        <h1>Создание администратора</h1>
+        <p>Создайте учётную запись администратора для управления библиотекой.</p>
+      </div>
+
+      {% if error %}
+        <div class="alert">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/setup" class="form-stack">
+        <label class="field">
+          <span>Логин</span>
+          <input name="username" autocomplete="username" required />
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input name="password" type="password" autocomplete="new-password" required />
+        </label>
+        <label class="field">
+          <span>Подтверждение пароля</span>
+          <input name="password_confirm" type="password" autocomplete="new-password" required />
+        </label>
+        <button class="button" type="submit">Создать</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

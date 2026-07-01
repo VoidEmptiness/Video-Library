@@ -26,8 +26,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from .database import SessionLocal, engine, get_db
-from .models import Base, Folder, Tag, Video, VideoTag
-from .services.auth import GUEST_USER, SESSION_COOKIE, create_session_token, is_guest, parse_session_token, session_expiry_dt, verify_credentials
+from .models import Base, Folder, Tag, User, Video, VideoTag
+from .services.auth import GUEST_USER, SESSION_COOKIE, create_session_token, has_users, is_guest, parse_session_token, session_expiry_dt, verify_credentials
 from .services.storage import THUMB_DIR, ensure_dirs, unique_storage_name, video_path
 
 DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).parent.parent / "_data")))
@@ -85,6 +85,9 @@ templates.env.filters["short_name"] = short_name
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_db()
+    from .services.auth import ensure_secret_key, migrate_env_users
+    ensure_secret_key()
+    migrate_env_users()
 
 
 def _migrate_db() -> None:
@@ -643,6 +646,8 @@ def healthz():
 def login_page(request: Request):
     if not _wants_auth():
         return _redirect("/")
+    if not has_users():
+        return _redirect("/setup")
     return templates.TemplateResponse("login.html", {"request": request, "title": APP_TITLE})
 
 
@@ -677,6 +682,52 @@ def logout():
     resp = _redirect("/login")
     resp.delete_cookie(SESSION_COOKIE)
     return resp
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_page(request: Request):
+    if not _wants_auth():
+        return _redirect("/")
+    if has_users():
+        return _redirect("/login")
+    return templates.TemplateResponse("setup.html", {"request": request, "title": APP_TITLE})
+
+
+@app.post("/setup")
+def setup_submit(
+    request: Request,
+    username: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    password_confirm: Annotated[str, Form()],
+):
+    if not _wants_auth():
+        return _redirect("/")
+    if has_users():
+        return _redirect("/login")
+    if not username or not password:
+        return templates.TemplateResponse(
+            "setup.html",
+            {"request": request, "title": APP_TITLE, "error": "Заполните все поля"},
+            status_code=400,
+        )
+    if password != password_confirm:
+        return templates.TemplateResponse(
+            "setup.html",
+            {"request": request, "title": APP_TITLE, "error": "Пароли не совпадают"},
+            status_code=400,
+        )
+    if len(password) < 4:
+        return templates.TemplateResponse(
+            "setup.html",
+            {"request": request, "title": APP_TITLE, "error": "Пароль должен быть не менее 4 символов"},
+            status_code=400,
+        )
+    from .services.auth import create_first_admin
+    try:
+        create_first_admin(username, password)
+    except RuntimeError:
+        return _redirect("/login")
+    return _redirect("/login")
 
 
 @app.post("/guest-login")
