@@ -906,6 +906,7 @@ html[data-theme="dark"] .video-card:hover {
   max-height: 85vh;
   background: #000;
   object-fit: contain;
+  object-position: center;
 }
 
 .player-loading {
@@ -1142,6 +1143,24 @@ html[data-theme="dark"] .video-card:hover {
   transform: scale(0.85);
 }
 
+.pc-rotate {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  display: none;
+  background: rgba(0,0,0,0.5);
+  border-radius: 8px;
+}
+
+.pc-rotate:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+.player-wrapper.fullscreen .pc-rotate {
+  display: inline-flex;
+}
+
 .player-wrapper.fullscreen {
   position: fixed;
   inset: 0;
@@ -1153,6 +1172,44 @@ html[data-theme="dark"] .video-card:hover {
 .player-wrapper.fullscreen .player {
   max-height: 100vh;
   height: 100%;
+}
+
+.player-video-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.player-wrapper.fullscreen .player-video-wrap.rot-90,
+.player-wrapper.fullscreen .player-video-wrap.rot-270 {
+  position: absolute;
+  width: 100vh;
+  height: 100vw;
+  inset: 0;
+  margin: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-wrapper.fullscreen .player-video-wrap.rot-90 .player,
+.player-wrapper.fullscreen .player-video-wrap.rot-270 .player {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.player-wrapper.fullscreen .player-video-wrap.rot-90 {
+  transform: rotate(90deg);
+}
+
+.player-wrapper.fullscreen .player-video-wrap.rot-180 {
+  transform: rotate(180deg);
+}
+
+.player-wrapper.fullscreen .player-video-wrap.rot-270 {
+  transform: rotate(270deg);
 }
 
 .player-wrapper.fullscreen .player-controls {

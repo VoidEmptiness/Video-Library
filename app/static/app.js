@@ -688,11 +688,41 @@ function wireVideoPlayerShortcuts() {
     if (event.key === "f" || event.key === "F") {
       event.preventDefault();
       const wrapper = document.querySelector("[data-player-wrapper]");
-      if (!wrapper) return;
-      if (!document.fullscreenElement) {
-        wrapper.requestFullscreen().catch(() => {});
+      const video = document.querySelector("video.player");
+      if (!wrapper || !video) return;
+      const fs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fs) {
+        const lockFs = () => {
+          if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {});
+        };
+        if (wrapper.requestFullscreen) {
+          wrapper.requestFullscreen().then(lockFs).catch(() => {
+            if (video.requestFullscreen) {
+              video.requestFullscreen().then(lockFs).catch(() => {
+                if (video.webkitEnterFullscreen) {
+                  video.webkitEnterFullscreen();
+                  lockFs();
+                }
+              });
+            }
+          });
+        } else if (video.webkitEnterFullscreen) {
+          video.webkitEnterFullscreen();
+          lockFs();
+        }
       } else {
-        document.exitFullscreen().catch(() => {});
+        const doExit = () => {
+          if (document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          }
+        };
+        if (screen.orientation && screen.orientation.lock) {
+          screen.orientation.lock("portrait").then(doExit).catch(doExit);
+        } else {
+          doExit();
+        }
       }
       return;
     }
@@ -876,6 +906,7 @@ function togglePlay() {
   playBtn?.addEventListener("click", togglePlay);
   wrapper.addEventListener("click", (e) => {
     if (e.target.closest(".player-controls")) return;
+    if (e.target.closest("[data-pc-rotate]")) return;
     if (document.querySelector("[data-player-loading].active")) return;
     togglePlay();
   });
@@ -977,17 +1008,79 @@ volSlider?.addEventListener("input", () => {
   } else {
     video.addEventListener("loadedmetadata", onVolReady, { once: true });
   }
-fsBtn?.addEventListener("click", () => {
-    if (!document.fullscreenElement) {
-      wrapper.requestFullscreen().catch(() => {});
-    } else {
+  function getFSElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement;
+  }
+
+  function lockLandscape() {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock("landscape").catch(() => {});
+    }
+  }
+
+  function requestFS() {
+    if (wrapper.requestFullscreen) {
+      wrapper.requestFullscreen().then(lockLandscape).catch(() => {
+        if (video.requestFullscreen) {
+          video.requestFullscreen().then(lockLandscape).catch(() => {
+            if (video.webkitEnterFullscreen) {
+              video.webkitEnterFullscreen();
+              lockLandscape();
+            }
+          });
+        }
+      });
+    } else if (video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+      lockLandscape();
+    }
+  }
+
+  function doExitFS() {
+    if (document.exitFullscreen) {
       document.exitFullscreen().catch(() => {});
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  }
+
+  function exitFS() {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock("portrait").then(doExitFS).catch(doExitFS);
+    } else {
+      doExitFS();
+    }
+  }
+
+  function onFSChange() {
+    const isFS = !!getFSElement();
+    wrapper.classList.toggle("fullscreen", isFS);
+    if (!isFS) {
+      videoWrap?.classList.remove(...rots);
+      rotIdx = -1;
+    }
+  }
+
+  fsBtn?.addEventListener("click", () => {
+    if (!getFSElement()) {
+      requestFS();
+    } else {
+      exitFS();
     }
   });
 
-  document.addEventListener("fullscreenchange", () => {
-    wrapper.classList.toggle("fullscreen", !!document.fullscreenElement);
+  const rotateBtn = wrapper.querySelector("[data-pc-rotate]");
+  const videoWrap = wrapper.querySelector("[data-player-video-wrap]");
+  const rots = ["rot-90", "rot-180", "rot-270"];
+  let rotIdx = -1;
+  rotateBtn?.addEventListener("click", () => {
+    videoWrap?.classList.remove(...rots);
+    rotIdx = (rotIdx + 1) % (rots.length + 1);
+    if (rots[rotIdx]) videoWrap?.classList.add(rots[rotIdx]);
   });
+
+  document.addEventListener("fullscreenchange", onFSChange);
+  document.addEventListener("webkitfullscreenchange", onFSChange);
 document.addEventListener("keydown", (event) => {
     if (isTypingTarget(event.target)) return;
     if (event.altKey || event.metaKey || event.ctrlKey) return;
