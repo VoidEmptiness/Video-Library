@@ -29,7 +29,6 @@ git clone https://github.com/VoidEmptiness/Video-Library.git && cd Video-Library
 | `ADMIN_PASSWORD` | — | Пароль (только для миграции существующих установок, опционально) |
 | `SECRET_KEY` | авто-генерация | Ключ подписи сессионных токенов (опционально, если не задан — генерируется и сохраняется в `/data/secret_key`) |
 | `APP_TITLE` | `Video Library` | Название приложения в интерфейсе |
-
 | `THUMBNAIL_TIMEOUT_SECONDS` | `30` | Таймаут генерации миниатюры |
 
 ## Страницы
