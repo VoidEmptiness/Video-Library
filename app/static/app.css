@@ -2207,6 +2207,31 @@ html[data-theme="dark"] .video-card:hover {
   gap: 8px;
 }
 
+.filter-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.filter-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.filter-inline input {
+  width: 80px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
 @media (max-width: 640px) {
   .col-date {
     display: none;

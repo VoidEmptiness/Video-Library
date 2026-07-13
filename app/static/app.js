@@ -22,6 +22,8 @@ function wireSearchForm() {
     const untagged = isUntaggedFilterEnabled(form);
     const url = new URL(window.location.href);
     const query = form.querySelector('input[name="q"]')?.value || "";
+    const minDur = form.querySelector('input[name="min_duration"]')?.value || "";
+    const maxDur = form.querySelector('input[name="max_duration"]')?.value || "";
 
     url.pathname = "/";
     if (query.trim()) url.searchParams.set("q", query);
@@ -35,6 +37,11 @@ function wireSearchForm() {
       if (ids) url.searchParams.set("tags", ids);
       else url.searchParams.delete("tags");
     }
+
+    if (minDur.trim()) url.searchParams.set("min_duration", minDur);
+    else url.searchParams.delete("min_duration");
+    if (maxDur.trim()) url.searchParams.set("max_duration", maxDur);
+    else url.searchParams.delete("max_duration");
 
     window.location.href = url.toString();
     event.preventDefault();

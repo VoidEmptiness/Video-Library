@@ -169,6 +169,8 @@ def _video_query(
     tag_ids: set[int] | None = None,
     q: str | None = None,
     untagged: bool = False,
+    min_duration: float | None = None,
+    max_duration: float | None = None,
 ):
     stmt = select(Video).order_by(Video.created_at.desc())
     if untagged:
@@ -187,6 +189,10 @@ def _video_query(
         q = q.strip()
         if q:
             stmt = stmt.where(Video.original_name.ilike(f"%{q}%"))
+    if min_duration is not None:
+        stmt = stmt.where(Video.duration_seconds >= min_duration)
+    if max_duration is not None:
+        stmt = stmt.where(Video.duration_seconds <= max_duration)
     return stmt
 
 
@@ -195,6 +201,8 @@ def _video_count(
     tag_ids: set[int] | None = None,
     q: str | None = None,
     untagged: bool = False,
+    min_duration: float | None = None,
+    max_duration: float | None = None,
 ) -> int:
     stmt = select(func.count(Video.id))
     if untagged:
@@ -211,6 +219,10 @@ def _video_count(
         q = q.strip()
         if q:
             stmt = stmt.where(Video.original_name.ilike(f"%{q}%"))
+    if min_duration is not None:
+        stmt = stmt.where(Video.duration_seconds >= min_duration)
+    if max_duration is not None:
+        stmt = stmt.where(Video.duration_seconds <= max_duration)
     result = db.execute(stmt).scalar()
     return result or 0
 

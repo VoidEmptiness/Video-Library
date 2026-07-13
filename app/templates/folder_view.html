@@ -107,7 +107,7 @@
             </div>
             <div class="video-meta">
               <strong title="{{ v.original_name }}">{{ v.original_name|short_name }}</strong>
-              <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
+              <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB{% if v.duration_seconds %} · {{ v.duration_seconds|format_duration }}{% endif %}</span>
             </div>
             <div class="chips">
               {% for t in v.tags %}

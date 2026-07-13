@@ -47,15 +47,17 @@ def index(
     q: str | None = None,
     untagged: bool = False,
     page: int = 1,
+    min_duration: float | None = None,
+    max_duration: float | None = None,
 ):
     tag_ids = _tag_ids_from_csv(tags)
-    total = _video_count(db, tag_ids=tag_ids, q=q, untagged=untagged)
+    total = _video_count(db, tag_ids=tag_ids, q=q, untagged=untagged, min_duration=min_duration, max_duration=max_duration)
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(1, min(page, total_pages))
     offset = (page - 1) * PAGE_SIZE
     videos = list(
         db.execute(
-            _video_query(db, tag_ids=tag_ids, q=q, untagged=untagged)
+            _video_query(db, tag_ids=tag_ids, q=q, untagged=untagged, min_duration=min_duration, max_duration=max_duration)
             .offset(offset)
             .limit(PAGE_SIZE)
         )
@@ -77,6 +79,8 @@ def index(
             "page": page,
             "total_pages": total_pages,
             "total_videos": total,
+            "min_duration": min_duration,
+            "max_duration": max_duration,
         },
     )
 
@@ -123,11 +127,14 @@ async def upload_video(
                 raise HTTPException(status_code=507, detail="Недостаточно места на диске")
             raise HTTPException(status_code=500, detail="Ошибка записи файла на диск")
 
+        _codec, probe_duration, _w, _h = _probe_video_metadata(dest)
+
         video = Video(
             filename=storage_name,
             original_name=file.filename,
             content_type=file.content_type or "application/octet-stream",
             size_bytes=size,
+            duration_seconds=probe_duration,
         )
         db.add(video)
         db.flush()

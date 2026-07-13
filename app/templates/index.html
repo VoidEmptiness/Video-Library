@@ -47,7 +47,7 @@
                     <strong title="{{ v.original_name }}">
                       {{ v.original_name|short_name }}
                     </strong>
-                  <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
+                  <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB{% if v.duration_seconds %} · {{ v.duration_seconds|format_duration }}{% endif %}</span>
                 </div>
               </a>
               <div class="chips">
@@ -64,10 +64,10 @@
           <span class="pagination-info">Страница {{ page }} из {{ total_pages }} ({{ total_videos }} видео)</span>
           <div class="pagination-links">
             {% if page > 1 %}
-            <a class="button secondary compact" href="?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}">← Назад</a>
+            <a class="button secondary compact" href="?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}">← Назад</a>
             {% endif %}
             {% if page < total_pages %}
-            <a class="button secondary compact" href="?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}">Вперёд →</a>
+            <a class="button secondary compact" href="?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}">Вперёд →</a>
             {% endif %}
           </div>
         </div>
@@ -78,7 +78,7 @@
     <article class="panel">
       <div class="panel-title">
         <h2>Фильтр</h2>
-        <p>Поиск по имени файла и выбранным тегам.</p>
+        <p>Поиск по имени файла, длительности и тегам.</p>
       </div>
 
       <form method="get" action="/" class="form-stack">
@@ -86,6 +86,20 @@
           <span>Имя файла</span>
           <input name="q" value="{{ q }}" placeholder="Например: vacation" />
         </label>
+
+        <div class="field">
+          <span>Длительность (сек)</span>
+          <div class="filter-row">
+            <label class="filter-inline">
+              <span>от</span>
+              <input type="number" name="min_duration" value="{{ min_duration or '' }}" placeholder="0" min="0" />
+            </label>
+            <label class="filter-inline">
+              <span>до</span>
+              <input type="number" name="max_duration" value="{{ max_duration or '' }}" placeholder="∞" min="0" />
+            </label>
+          </div>
+        </div>
 
         <div class="field">
           <span>Теги</span>
@@ -143,7 +157,7 @@
     <article class="panel">
       <div class="panel-title">
         <h2>Фильтр</h2>
-        <p>Поиск по имени файла и выбранным тегам.</p>
+        <p>Поиск по имени файла, длительности и тегам.</p>
       </div>
 
       <form method="get" action="/" class="form-stack">
@@ -151,6 +165,20 @@
           <span>Имя файла</span>
           <input name="q" value="{{ q }}" placeholder="Например: vacation" />
         </label>
+
+        <div class="field">
+          <span>Длительность (сек)</span>
+          <div class="filter-row">
+            <label class="filter-inline">
+              <span>от</span>
+              <input type="number" name="min_duration" value="{{ min_duration or '' }}" placeholder="0" min="0" />
+            </label>
+            <label class="filter-inline">
+              <span>до</span>
+              <input type="number" name="max_duration" value="{{ max_duration or '' }}" placeholder="∞" min="0" />
+            </label>
+          </div>
+        </div>
 
         <div class="field">
           <span>Теги</span>
@@ -235,7 +263,7 @@
                     <strong title="{{ v.original_name }}">
                       {{ v.original_name|short_name }}
                     </strong>
-                  <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB</span>
+                  <span>{{ (v.size_bytes/1024/1024) | round(2) }} MB{% if v.duration_seconds %} · {{ v.duration_seconds|format_duration }}{% endif %}</span>
                 </div>
               </a>
               <div class="chips">
@@ -253,10 +281,10 @@
         <span class="pagination-info">Страница {{ page }} из {{ total_pages }} ({{ total_videos }} видео)</span>
         <div class="pagination-links">
           {% if page > 1 %}
-          <a class="button secondary compact" href="?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}">← Назад</a>
+          <a class="button secondary compact" href="?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}">← Назад</a>
           {% endif %}
           {% if page < total_pages %}
-          <a class="button secondary compact" href="?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}">Вперёд →</a>
+          <a class="button secondary compact" href="?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}">Вперёд →</a>
           {% endif %}
         </div>
       </div>
