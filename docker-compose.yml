@@ -8,6 +8,7 @@ services:
       DATABASE_URL: "sqlite:////data/app.db"
       VIDEO_DIR: "/data/videos"
       THUMB_DIR: "/data/thumbs"
+      SUBTITLE_DIR: "/data/subtitles"
       AUTH_ENABLED: "true"
       TRANSCODE_ENABLED: "true"
       TRANSCODE_CRF: "23"

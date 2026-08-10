@@ -51,7 +51,28 @@ class Video(Base):
         order_by="Tag.name",
     )
 
+    subtitles: Mapped[list[Subtitle]] = relationship(
+        "Subtitle",
+        back_populates="video",
+        cascade="all, delete-orphan",
+        order_by="Subtitle.created_at",
+    )
 
+
+
+
+class Subtitle(Base):
+    __tablename__ = "subtitles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    video_id: Mapped[int] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    original_name: Mapped[str] = mapped_column(String(255))
+    label: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    video: Mapped[Video] = relationship("Video", back_populates="subtitles")
 
 
 class Tag(Base):

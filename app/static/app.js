@@ -1361,6 +1361,210 @@ function wireQualitySelector() {
   });
 }
 
+function wireSubtitles() {
+  const shell = document.querySelector("[data-player-shell]");
+  const video = document.querySelector("video.player");
+  const ccWrap = document.querySelector("[data-pc-cc]");
+  const ccBtn = document.querySelector("[data-pc-cc-btn]");
+  const ccMenu = document.querySelector("[data-pc-cc-menu]");
+  const overlay = document.querySelector("[data-player-subtitles]");
+  if (!shell || !video || !ccWrap || !ccBtn || !ccMenu || !overlay) return;
+  const videoId = shell.dataset.videoId;
+  if (!videoId) return;
+
+  const STORE_KEY = "vl.subtitles.track";
+  let tracks = [];
+  let activeTrack = null;
+  let lastTrack = null;
+  let cues = [];
+  let lastRendered = -1;
+  let lastSignature = "";
+
+  function parseTs(ts) {
+    const t = ts.trim().replace(",", ".");
+    const parts = t.split(":");
+    let sec = parseFloat(parts[parts.length - 1]) || 0;
+    let mult = 1;
+    for (let i = parts.length - 2; i >= 0; i--) {
+      mult *= 60;
+      sec += (parseFloat(parts[i]) || 0) * mult;
+    }
+    return sec;
+  }
+
+  function parseVtt(text) {
+    const cuesOut = [];
+    let cue = null;
+    let lines = [];
+    for (const raw of text.replace(/\r/g, "").split("\n")) {
+      const line = raw.trim();
+      if (cue && line === "") {
+        if (lines.length) cuesOut.push({ start: cue.start, end: cue.end, text: lines.join("\n") });
+        cue = null;
+        lines = [];
+        continue;
+      }
+      if (cue) {
+        if (!line.startsWith("WEBVTT") && !line.startsWith("NOTE")) lines.push(line);
+        continue;
+      }
+      const m = line.match(/(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3})/);
+      if (m) {
+        cue = { start: parseTs(m[1]), end: parseTs(m[2]) };
+        lines = [];
+      }
+    }
+    if (cue && lines.length) cuesOut.push({ start: cue.start, end: cue.end, text: lines.join("\n") });
+    cuesOut.sort((a, b) => a.start - b.start);
+    return cuesOut;
+  }
+
+  function displayTime() {
+    return (video.currentTime || 0) + (parseFloat(video.dataset.startSec) || 0);
+  }
+
+  function render(force) {
+    if (!overlay) return;
+    const t = displayTime();
+    if (!force && Math.abs(t - lastRendered) < 0.05) return;
+    lastRendered = t;
+    const active = [];
+    if (activeTrack && cues.length) {
+      for (const c of cues) {
+        if (t >= c.start && t < c.end) active.push(c.text);
+        else if (c.start > t) break;
+      }
+    }
+    const signature = active.join("\u0000");
+    if (!force && signature === lastSignature) return;
+    lastSignature = signature;
+    overlay.innerHTML = "";
+    if (!active.length) return;
+    for (const text of active) {
+      const div = document.createElement("div");
+      div.className = "ps-cue";
+      for (const ln of text.split("\n")) {
+        const p = document.createElement("p");
+        p.textContent = ln;
+        div.appendChild(p);
+      }
+      overlay.appendChild(div);
+    }
+  }
+
+  function updateMenuUI() {
+    ccBtn.classList.toggle("active", !!activeTrack);
+    for (const btn of ccMenu.querySelectorAll("[data-pc-cc-opt]")) {
+      const opt = btn.dataset.pcCcOpt;
+      btn.classList.toggle("active", opt === "off" ? !activeTrack : activeTrack?.key === opt);
+    }
+  }
+
+  function loadTrack(track) {
+    if (activeTrack) lastTrack = activeTrack;
+    activeTrack = track;
+    cues = [];
+    lastSignature = "";
+    overlay.innerHTML = "";
+    if (!track) {
+      localStorage.removeItem(STORE_KEY);
+    } else {
+      localStorage.setItem(STORE_KEY, track.key);
+      fetch(track.url)
+        .then((r) => {
+          if (!r.ok) throw new Error("VTT load failed");
+          return r.text();
+        })
+        .then((text) => {
+          if (activeTrack !== track) return;
+          cues = parseVtt(text);
+          render(true);
+        })
+        .catch(() => {
+          if (activeTrack === track) {
+            activeTrack = null;
+            localStorage.removeItem(STORE_KEY);
+            updateMenuUI();
+            render(true);
+          }
+        });
+    }
+    updateMenuUI();
+    render(true);
+  }
+
+  function buildMenu() {
+    ccMenu.innerHTML = "";
+    const offBtn = document.createElement("button");
+    offBtn.type = "button";
+    offBtn.className = "pc-cc-opt";
+    offBtn.dataset.pcCcOpt = "off";
+    offBtn.textContent = "Субтитры: выкл";
+    offBtn.addEventListener("click", () => { loadTrack(null); ccMenu.hidden = true; });
+    ccMenu.appendChild(offBtn);
+    for (const tr of tracks) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pc-cc-opt";
+      btn.dataset.pcCcOpt = tr.key;
+      btn.textContent = tr.label + (tr.is_default ? " (по умолчанию)" : "");
+      btn.addEventListener("click", () => { loadTrack(tr); ccMenu.hidden = true; });
+      ccMenu.appendChild(btn);
+    }
+    updateMenuUI();
+  }
+
+  fetch("/videos/" + videoId + "/subtitles")
+    .then((r) => {
+      if (!r.ok) throw new Error("Subtitle list failed");
+      return r.json();
+    })
+    .then((list) => {
+      tracks = list;
+      if (!tracks.length) return;
+      ccBtn.hidden = false;
+      buildMenu();
+      const savedKey = localStorage.getItem(STORE_KEY);
+      const initial =
+        tracks.find((t) => t.key === savedKey) ||
+        tracks.find((t) => t.is_default) ||
+        null;
+      if (initial) loadTrack(initial);
+    })
+    .catch(() => {});
+
+  ccBtn.addEventListener("click", () => {
+    ccMenu.hidden = !ccMenu.hidden;
+    updateMenuUI();
+  });
+  document.addEventListener("click", (e) => {
+    if (!ccMenu.hidden && !e.target.closest("[data-pc-cc]")) ccMenu.hidden = true;
+  });
+  ccMenu.addEventListener("click", (e) => e.stopPropagation());
+
+  video.addEventListener("timeupdate", () => render(false));
+  video.addEventListener("seeked", () => render(true));
+
+  document.addEventListener("keydown", (event) => {
+    if (isTypingTarget(event.target)) return;
+    if (event.altKey || event.metaKey || event.ctrlKey) return;
+    if (document.querySelector("video.player") !== video) return;
+    if (event.key !== "c" && event.key !== "C" && event.key !== "с" && event.key !== "С") return;
+    if (ccBtn.hidden) return;
+    event.preventDefault();
+    if (activeTrack) {
+      loadTrack(null);
+    } else {
+      const next =
+        lastTrack ||
+        tracks.find((t) => t.key === localStorage.getItem(STORE_KEY)) ||
+        tracks.find((t) => t.is_default) ||
+        tracks[0];
+      if (next) loadTrack(next);
+    }
+  });
+}
+
 function showAlert(message) {
   return showDialog(message, { type: "alert" });
 }
@@ -1580,6 +1784,7 @@ document.addEventListener("DOMContentLoaded", () => {
   applyDefaultVolume();
   wireCustomControls();
   wireQualitySelector();
+  wireSubtitles();
   wireToast();
   wireFilePicker();
   wireDialogConfirms();

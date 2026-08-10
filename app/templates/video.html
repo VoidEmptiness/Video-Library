@@ -27,6 +27,8 @@
         </button>
         <video class="player" preload="auto" playsinline webkit-playsinline></video>
 
+        <div class="player-subtitles" data-player-subtitles></div>
+
         <div class="player-loading" data-player-loading>
           <div class="player-loading-spinner"></div>
           <div class="player-loading-text" data-player-loading-text></div>
@@ -69,6 +71,13 @@
             <div class="pc-quality-menu" data-pc-quality-menu hidden>
               <button type="button" class="pc-quality-opt active" data-pc-quality-opt="auto">Auto</button>
             </div>
+          </div>
+
+          <div class="pc-cc" data-pc-cc>
+            <button type="button" class="pc-btn pc-cc-btn" data-pc-cc-btn aria-label="Субтитры (C)" hidden>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M8.3 10.1a2.2 2.2 0 0 1 3.5 0"/><path d="M8.3 13.9a2.2 2.2 0 0 0 3.5 0"/><path d="M13.5 10.1a2.2 2.2 0 0 1 3.5 0"/><path d="M13.5 13.9a2.2 2.2 0 0 0 3.5 0"/></svg>
+            </button>
+            <div class="pc-cc-menu" data-pc-cc-menu hidden></div>
           </div>
 
           <button type="button" class="pc-btn pc-fullscreen" data-pc-fullscreen aria-label="Fullscreen">
@@ -117,6 +126,55 @@
       <span class="empty-inline tag-search-empty" data-tag-empty hidden>Теги не найдены</span>
       <button class="button" type="submit">Сохранить теги</button>
     </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-title">
+      <h2>Субтитры</h2>
+      <p>Дорожки, встроенные в видео, определяются автоматически. Ручная загрузка скрыта, но доступна для расширенных случаев.</p>
+    </div>
+
+    {% if subtitles %}
+    <ul class="subtitle-list" data-subtitle-list>
+      {% for s in subtitles %}
+      <li class="subtitle-item">
+        <span class="subtitle-name">{{ s.label }}</span>
+        {% if s.is_default %}<span class="pill">по умолчанию</span>{% endif %}
+        {% if s.kind == "embedded" %}<span class="pill pill--muted">в видео</span>{% endif %}
+        <span class="subtitle-meta">{% if s.kind == "uploaded" %}{{ s.original_name }}{% else %}встроенная дорожка{% endif %}</span>
+        <span class="subtitle-actions">
+          {% if s.kind == "uploaded" %}
+          {% if not s.is_default %}
+          <form method="post" action="/videos/{{ video.id }}/subtitles/{{ s.id }}/default">
+            <button class="button compact secondary" type="submit">По умолчанию</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/videos/{{ video.id }}/subtitles/{{ s.id }}/delete" data-confirm="Удалить субтитры?">
+            <button class="button compact danger" type="submit">Удалить</button>
+          </form>
+          {% endif %}
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty-inline">Субтитры не найдены</p>
+    {% endif %}
+
+    <details class="subtitle-manual">
+      <summary>Загрузить субтитры вручную (.srt / .vtt)</summary>
+      <form method="post" action="/videos/{{ video.id }}/subtitles" enctype="multipart/form-data" class="form-stack subtitle-upload">
+        <label class="field">
+          <span>Название (язык или метка)</span>
+          <input type="text" name="labels" placeholder="Например: Русский" />
+        </label>
+        <label class="field">
+          <span>Файлы (.srt / .vtt)</span>
+          <input type="file" name="files" accept=".srt,.vtt,text/vtt" multiple />
+        </label>
+        <button class="button" type="submit">Загрузить субтитры</button>
+      </form>
+    </details>
   </section>
   {% endif %}
 {% endblock %}

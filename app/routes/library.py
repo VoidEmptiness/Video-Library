@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..database import get_db
 from ..models import Tag, Video
 from ..services.storage import ensure_dirs, video_path
+from ..services.subtitles import _embedded_streams, extract_all_embedded_subtitles
 from ..services.utils import _redirect
 from .auth import AdminUser, AdminUserHTML
 
@@ -63,6 +64,7 @@ def library_export(
 @router.post("/library/import")
 def library_import(
     db: Annotated[Session, Depends(get_db)],
+    background_tasks: BackgroundTasks,
     _: AdminUserHTML,
     file: UploadFile = File(...),
 ):
@@ -123,6 +125,11 @@ def library_import(
                 )
                 db.add(video)
                 db.flush()
+
+                if _embedded_streams(dest):
+                    background_tasks.add_task(
+                        extract_all_embedded_subtitles, dest, video.id
+                    )
 
                 for tag_item in item.get("tags", []):
                     name = tag_item.get("name")

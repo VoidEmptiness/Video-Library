@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..config import APP_TITLE, MAX_FILES_PER_UPLOAD, PAGE_SIZE, templates
 from ..database import get_db
 from ..models import Tag, Video
-from ..services.storage import THUMB_DIR, ensure_dirs, unique_storage_name, video_path
+from ..services.storage import THUMB_DIR, delete_subtitle_files, ensure_dirs, unique_storage_name, video_path
 from ..services.thumbnails import generate_all_thumbnails
 from ..services.utils import (
     _all_tags,
@@ -33,6 +33,11 @@ from ..services.utils import (
     _video_query,
 )
 from ..services.hls import _cleanup_hls
+from ..services.subtitles import (
+    _embedded_streams,
+    _subtitle_list,
+    extract_all_embedded_subtitles,
+)
 from .auth import AdminUser, AdminUserHTML, UserHTML, is_guest
 
 logger = logging.getLogger(__name__)
@@ -187,6 +192,8 @@ async def upload_video(
 
         thumb_pairs.append((video.id, dest))
         created_ids.append(video.id)
+        if _embedded_streams(dest):
+            background_tasks.add_task(extract_all_embedded_subtitles, dest, video.id)
 
     logger.info("Uploaded %d file(s): %s", len(created_ids), [f.filename for f in files if f.filename])
 
@@ -219,6 +226,7 @@ def video_page(
     default_volume = get_setting("default_volume", 1.0)
     if is_guest(user):
         default_volume = 0.01
+    subtitles = _subtitle_list(db, video)
     return templates.TemplateResponse(
         "video.html",
         {
@@ -226,6 +234,7 @@ def video_page(
             "title": f"{APP_TITLE} \u2014 {video.original_name}",
             "user": user,
             "video": video,
+            "subtitles": subtitles,
             "all_tags": _all_tags(db),
             "codec_name": codec_display,
             "duration_label": _format_duration(duration_seconds),
@@ -294,6 +303,7 @@ def delete_video(
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     _cleanup_hls(video_id)
+    delete_subtitle_files(video_id)
     _delete_video_files(
         video_path(video.filename),
         Path(video.thumbnail_path) if video.thumbnail_path else None,
@@ -354,6 +364,7 @@ def delete_selected_videos(
 
     for video in videos:
         _cleanup_hls(video.id)
+        delete_subtitle_files(video.id)
         _delete_video_files(
             video_path(video.filename),
             Path(video.thumbnail_path) if video.thumbnail_path else None,

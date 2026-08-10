@@ -46,6 +46,7 @@ from .routes.folders import router as folders_router
 from .routes.hls import router as hls_router
 from .routes.library import router as library_router
 from .routes.settings import router as settings_router
+from .routes.subtitles import router as subtitles_router
 
 app.include_router(auth_router)
 app.include_router(admin_router)
@@ -55,3 +56,4 @@ app.include_router(folders_router)
 app.include_router(hls_router)
 app.include_router(library_router)
 app.include_router(settings_router)
+app.include_router(subtitles_router)
