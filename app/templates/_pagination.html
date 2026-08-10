@@ -1,0 +1,16 @@
+{% if total_pages > 1 %}
+{% set p_query -%}
+{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if tag_match == "all" %}&tag_match=all{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}{% if size_min %}&size_min={{ size_min }}{% endif %}{% if size_max %}&size_max={{ size_max }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}
+{%- endset %}
+<div class="pagination">
+  <span class="pagination-info">Страница {{ page }} из {{ total_pages }} ({{ total_videos }} видео)</span>
+  <div class="pagination-links">
+    {% if page > 1 %}
+    <a class="button secondary compact" href="?page={{ page - 1 }}{{ p_query }}">← Назад</a>
+    {% endif %}
+    {% if page < total_pages %}
+    <a class="button secondary compact" href="?page={{ page + 1 }}{{ p_query }}">Вперёд →</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

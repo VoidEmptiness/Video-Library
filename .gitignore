@@ -12,6 +12,8 @@ build/
 .venv/
 venv/
 env/
+.opencode/
+.swarm/
 .Python
 .env
 *.local

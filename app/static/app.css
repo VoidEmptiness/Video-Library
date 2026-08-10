@@ -576,6 +576,10 @@ html[data-theme="dark"] .brand-mark {
   font-weight: 700;
 }
 
+.switch-row--strong span {
+  color: var(--text);
+}
+
 .switch-row {
   display: flex;
   min-height: 44px;
@@ -2230,6 +2234,29 @@ html[data-theme="dark"] .video-card:hover {
   background: var(--surface);
   color: var(--text);
   font-size: 13px;
+}
+
+.filter-inline input[type="date"] {
+  width: 140px;
+  min-height: 34px;
+}
+
+.advanced-search summary {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 0;
+  width: fit-content;
+}
+
+.advanced-search[open] summary {
+  color: var(--accent);
+}
+
+.advanced-grid {
+  display: grid;
+  gap: 14px;
+  padding-top: 10px;
 }
 
 @media (max-width: 640px) {

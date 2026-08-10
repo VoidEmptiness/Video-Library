@@ -22,6 +22,8 @@ from ..services.utils import (
     _all_tags,
     _delete_video_files,
     _format_duration,
+    _parse_date_filter,
+    _parse_duration_filter,
     _probe_video_metadata,
     _redirect,
     _safe_return_to,
@@ -47,17 +49,55 @@ def index(
     q: str | None = None,
     untagged: bool = False,
     page: int = 1,
-    min_duration: float | None = None,
-    max_duration: float | None = None,
+    min_duration: str | None = None,
+    max_duration: str | None = None,
+    size_min: float | None = None,
+    size_max: float | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    tag_match: str = "any",
 ):
     tag_ids = _tag_ids_from_csv(tags)
-    total = _video_count(db, tag_ids=tag_ids, q=q, untagged=untagged, min_duration=min_duration, max_duration=max_duration)
+    if tag_match not in ("any", "all"):
+        tag_match = "any"
+    date_from_dt = _parse_date_filter(date_from)
+    date_to_dt = _parse_date_filter(date_to)
+    min_duration_sec = _parse_duration_filter(min_duration)
+    max_duration_sec = _parse_duration_filter(max_duration)
+    advanced_active = bool(
+        min_duration or max_duration or size_min or size_max or date_from or date_to
+    )
+    total = _video_count(
+        db,
+        tag_ids=tag_ids,
+        q=q,
+        untagged=untagged,
+        min_duration=min_duration_sec,
+        max_duration=max_duration_sec,
+        size_min=size_min,
+        size_max=size_max,
+        date_from=date_from_dt,
+        date_to=date_to_dt,
+        tag_match=tag_match,
+    )
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(1, min(page, total_pages))
     offset = (page - 1) * PAGE_SIZE
     videos = list(
         db.execute(
-            _video_query(db, tag_ids=tag_ids, q=q, untagged=untagged, min_duration=min_duration, max_duration=max_duration)
+            _video_query(
+                db,
+                tag_ids=tag_ids,
+                q=q,
+                untagged=untagged,
+                min_duration=min_duration_sec,
+                max_duration=max_duration_sec,
+                size_min=size_min,
+                size_max=size_max,
+                date_from=date_from_dt,
+                date_to=date_to_dt,
+                tag_match=tag_match,
+            )
             .offset(offset)
             .limit(PAGE_SIZE)
         )
@@ -81,6 +121,12 @@ def index(
             "total_videos": total,
             "min_duration": min_duration,
             "max_duration": max_duration,
+            "size_min": size_min,
+            "size_max": size_max,
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+            "tag_match": tag_match,
+            "advanced_active": advanced_active,
         },
     )
 

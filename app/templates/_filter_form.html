@@ -1,0 +1,89 @@
+<article class="panel">
+  <div class="panel-title">
+    <h2>Фильтр</h2>
+    <p>Поиск по имени файла, тегам, длительности, размеру и дате.</p>
+  </div>
+
+  <form method="get" action="/" class="form-stack">
+    <label class="field">
+      <span>Имя файла</span>
+      <input name="q" value="{{ q }}" placeholder="Например: vacation" />
+    </label>
+
+<div class="field">
+      <span>Теги</span>
+      <div class="filter-row">
+        <label class="filter-option">
+          <input type="checkbox" name="untagged" value="1" data-untagged-filter {% if untagged_filter %}checked{% endif %} />
+          <span>Показать видео без тегов</span>
+        </label>
+        {% if all_tags|length > 0 %}
+        <label class="switch-row switch-row--strong" data-tag-match-row>
+          <input type="checkbox" name="tag_match" value="all" {% if tag_match == "all" %}checked{% endif %} />
+          <span>Все выбранные теги</span>
+        </label>
+        {% endif %}
+      </div>
+      <div class="tags">
+        {% for t in all_tags %}
+          <label class="pill"{% if t.description %} title="{{ t.description }}"{% endif %}>
+            <input type="checkbox" name="tag" value="{{ t.id }}" {% if t.id in selected_tag_ids %}checked{% endif %}/>
+            <span>#{{ t.name }}</span>
+          </label>
+        {% endfor %}
+        {% if all_tags|length == 0 %}
+          <span class="empty-inline">Теги пока не созданы</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <details class="edit-box advanced-search" {% if advanced_active %}open{% endif %}>
+      <summary>Расширенный поиск</summary>
+      <div class="advanced-grid">
+        <div class="field">
+          <span>Длительность (час:мин:сек/мин:сек/сек)</span>
+          <div class="filter-row">
+            <label class="filter-inline">
+              <span>от</span>
+              <input type="text" name="min_duration" value="{{ min_duration or '' }}" placeholder="0:00" autocomplete="off" />
+            </label>
+            <label class="filter-inline">
+              <span>до</span>
+              <input type="text" name="max_duration" value="{{ max_duration or '' }}" placeholder="∞" autocomplete="off" />
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <span>Размер (МБ)</span>
+          <div class="filter-row">
+            <label class="filter-inline">
+              <span>от</span>
+              <input type="number" name="size_min" value="{{ size_min or '' }}" placeholder="0" min="0" step="any" />
+            </label>
+            <label class="filter-inline">
+              <span>до</span>
+              <input type="number" name="size_max" value="{{ size_max or '' }}" placeholder="∞" min="0" step="any" />
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <span>Дата загрузки</span>
+          <div class="filter-row">
+            <label class="filter-inline">
+              <span>с</span>
+              <input type="date" name="date_from" value="{{ date_from or '' }}" />
+            </label>
+            <label class="filter-inline">
+              <span>по</span>
+              <input type="date" name="date_to" value="{{ date_to or '' }}" />
+            </label>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <button class="button" type="submit">Применить фильтр</button>
+  </form>
+</article>

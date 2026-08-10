@@ -17,17 +17,23 @@ function wireSearchForm() {
   const form = document.querySelector('form[action="/"]');
   if (!form) return;
 
+  function inputValue(name) {
+    return form.querySelector(`input[name="${name}"]`)?.value || "";
+  }
+
   form.addEventListener("submit", (event) => {
     const ids = collectTagFilters();
     const untagged = isUntaggedFilterEnabled(form);
     const url = new URL(window.location.href);
-    const query = form.querySelector('input[name="q"]')?.value || "";
-    const minDur = form.querySelector('input[name="min_duration"]')?.value || "";
-    const maxDur = form.querySelector('input[name="max_duration"]')?.value || "";
+    const tagMatch = form.querySelector('input[name="tag_match"]:checked')?.value || "any";
 
     url.pathname = "/";
+    const query = inputValue("q");
     if (query.trim()) url.searchParams.set("q", query);
     else url.searchParams.delete("q");
+
+    if (tagMatch === "all") url.searchParams.set("tag_match", "all");
+    else url.searchParams.delete("tag_match");
 
     if (untagged) {
       url.searchParams.set("untagged", "1");
@@ -38,10 +44,11 @@ function wireSearchForm() {
       else url.searchParams.delete("tags");
     }
 
-    if (minDur.trim()) url.searchParams.set("min_duration", minDur);
-    else url.searchParams.delete("min_duration");
-    if (maxDur.trim()) url.searchParams.set("max_duration", maxDur);
-    else url.searchParams.delete("max_duration");
+    for (const name of ["min_duration", "max_duration", "size_min", "size_max", "date_from", "date_to"]) {
+      const value = inputValue(name);
+      url.searchParams.delete(name);
+      if (value.trim()) url.searchParams.set(name, value.trim());
+    }
 
     window.location.href = url.toString();
     event.preventDefault();
@@ -53,12 +60,14 @@ function wireUntaggedFilter() {
   if (!checkbox) return;
 
   const tagChecks = Array.from(document.querySelectorAll('input[type="checkbox"][name="tag"]'));
+  const matchRow = document.querySelector("[data-tag-match-row]");
 
   function syncTagState() {
     for (const tagCheck of tagChecks) {
       tagCheck.disabled = checkbox.checked;
       if (checkbox.checked) tagCheck.checked = false;
     }
+    if (matchRow) matchRow.hidden = checkbox.checked;
   }
 
   checkbox.addEventListener("change", syncTagState);

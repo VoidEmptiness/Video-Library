@@ -60,69 +60,12 @@
         </div>
 
         {% if total_pages > 1 %}
-        <div class="pagination">
-          <span class="pagination-info">Страница {{ page }} из {{ total_pages }} ({{ total_videos }} видео)</span>
-          <div class="pagination-links">
-            {% if page > 1 %}
-            <a class="button secondary compact" href="?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}">← Назад</a>
-            {% endif %}
-            {% if page < total_pages %}
-            <a class="button secondary compact" href="?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}">Вперёд →</a>
-            {% endif %}
-          </div>
-        </div>
+        {% include "_pagination.html" %}
         {% endif %}
       {% endif %}
     </section>
 
-    <article class="panel">
-      <div class="panel-title">
-        <h2>Фильтр</h2>
-        <p>Поиск по имени файла, длительности и тегам.</p>
-      </div>
-
-      <form method="get" action="/" class="form-stack">
-        <label class="field">
-          <span>Имя файла</span>
-          <input name="q" value="{{ q }}" placeholder="Например: vacation" />
-        </label>
-
-        <div class="field">
-          <span>Длительность (сек)</span>
-          <div class="filter-row">
-            <label class="filter-inline">
-              <span>от</span>
-              <input type="number" name="min_duration" value="{{ min_duration or '' }}" placeholder="0" min="0" />
-            </label>
-            <label class="filter-inline">
-              <span>до</span>
-              <input type="number" name="max_duration" value="{{ max_duration or '' }}" placeholder="∞" min="0" />
-            </label>
-          </div>
-        </div>
-
-        <div class="field">
-          <span>Теги</span>
-          <label class="filter-option">
-            <input type="checkbox" name="untagged" value="1" data-untagged-filter {% if untagged_filter %}checked{% endif %} />
-            <span>Показать только видео без тегов</span>
-          </label>
-          <div class="tags">
-            {% for t in all_tags %}
-              <label class="pill"{% if t.description %} title="{{ t.description }}"{% endif %}>
-                <input type="checkbox" name="tag" value="{{ t.id }}" {% if t.id in selected_tag_ids %}checked{% endif %}/>
-                <span>#{{ t.name }}</span>
-              </label>
-            {% endfor %}
-            {% if all_tags|length == 0 %}
-              <span class="empty-inline">Теги пока не созданы</span>
-            {% endif %}
-          </div>
-        </div>
-
-        <button class="button" type="submit">Применить фильтр</button>
-      </form>
-    </article>
+    {% include "_filter_form.html" %}
   </section>
   {% else %}
   <section class="workspace-grid">
@@ -154,54 +97,7 @@
       </div>
     </article>
 
-    <article class="panel">
-      <div class="panel-title">
-        <h2>Фильтр</h2>
-        <p>Поиск по имени файла, длительности и тегам.</p>
-      </div>
-
-      <form method="get" action="/" class="form-stack">
-        <label class="field">
-          <span>Имя файла</span>
-          <input name="q" value="{{ q }}" placeholder="Например: vacation" />
-        </label>
-
-        <div class="field">
-          <span>Длительность (сек)</span>
-          <div class="filter-row">
-            <label class="filter-inline">
-              <span>от</span>
-              <input type="number" name="min_duration" value="{{ min_duration or '' }}" placeholder="0" min="0" />
-            </label>
-            <label class="filter-inline">
-              <span>до</span>
-              <input type="number" name="max_duration" value="{{ max_duration or '' }}" placeholder="∞" min="0" />
-            </label>
-          </div>
-        </div>
-
-        <div class="field">
-          <span>Теги</span>
-          <label class="filter-option">
-            <input type="checkbox" name="untagged" value="1" data-untagged-filter {% if untagged_filter %}checked{% endif %} />
-            <span>Показать только видео без тегов</span>
-          </label>
-          <div class="tags">
-            {% for t in all_tags %}
-              <label class="pill"{% if t.description %} title="{{ t.description }}"{% endif %}>
-                <input type="checkbox" name="tag" value="{{ t.id }}" {% if t.id in selected_tag_ids %}checked{% endif %}/>
-                <span>#{{ t.name }}</span>
-              </label>
-            {% endfor %}
-            {% if all_tags|length == 0 %}
-              <span class="empty-inline">Теги пока не созданы</span>
-            {% endif %}
-          </div>
-        </div>
-
-        <button class="button" type="submit">Применить фильтр</button>
-      </form>
-    </article>
+    {% include "_filter_form.html" %}
   </section>
   {% endif %}
 
@@ -277,17 +173,7 @@
       </form>
 
       {% if total_pages > 1 %}
-      <div class="pagination">
-        <span class="pagination-info">Страница {{ page }} из {{ total_pages }} ({{ total_videos }} видео)</span>
-        <div class="pagination-links">
-          {% if page > 1 %}
-          <a class="button secondary compact" href="?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}">← Назад</a>
-          {% endif %}
-          {% if page < total_pages %}
-          <a class="button secondary compact" href="?page={{ page + 1 }}{% if q %}&q={{ q }}{% endif %}{% if tags %}&tags={{ tags }}{% endif %}{% if untagged_filter %}&untagged=1{% endif %}{% if min_duration %}&min_duration={{ min_duration }}{% endif %}{% if max_duration %}&max_duration={{ max_duration }}{% endif %}">Вперёд →</a>
-          {% endif %}
-        </div>
-      </div>
+      {% include "_pagination.html" %}
       {% endif %}
 
       <div class="modal-overlay" data-bulk-tags-modal hidden>

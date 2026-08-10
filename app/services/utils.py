@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
@@ -164,6 +165,37 @@ def _tag_ids_from_csv(csv: str | None) -> set[int]:
     return out
 
 
+def _parse_date_filter(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _parse_duration_filter(value: str | None) -> float | None:
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if ":" in value:
+        total = 0.0
+        try:
+            for part in value.split(":"):
+                total = total * 60 + float(part)
+        except ValueError:
+            return None
+    else:
+        try:
+            total = float(value)
+        except ValueError:
+            return None
+    return total if total >= 0 else None
+
+
 def _video_query(
     db: Session,
     tag_ids: set[int] | None = None,
@@ -171,18 +203,24 @@ def _video_query(
     untagged: bool = False,
     min_duration: float | None = None,
     max_duration: float | None = None,
+    size_min: float | None = None,
+    size_max: float | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    tag_match: str = "any",
 ):
     stmt = select(Video).order_by(Video.created_at.desc())
     if untagged:
         stmt = stmt.where(~Video.tags.any()).options(joinedload(Video.tags))
     elif tag_ids:
-        subq = (
-            select(VideoTag.video_id)
-            .where(VideoTag.tag_id.in_(tag_ids))
-            .group_by(VideoTag.video_id)
-            .subquery()
-        )
-        stmt = stmt.where(Video.id.in_(subq)).options(joinedload(Video.tags))
+        subq = select(VideoTag.video_id).where(VideoTag.tag_id.in_(tag_ids))
+        if tag_match == "all":
+            subq = subq.group_by(VideoTag.video_id).having(
+                func.count(VideoTag.tag_id) == len(tag_ids)
+            )
+        else:
+            subq = subq.distinct()
+        stmt = stmt.where(Video.id.in_(subq.subquery())).options(joinedload(Video.tags))
     else:
         stmt = stmt.options(joinedload(Video.tags))
     if q:
@@ -193,6 +231,14 @@ def _video_query(
         stmt = stmt.where(Video.duration_seconds >= min_duration)
     if max_duration is not None:
         stmt = stmt.where(Video.duration_seconds <= max_duration)
+    if size_min is not None:
+        stmt = stmt.where(Video.size_bytes >= size_min * 1024 * 1024)
+    if size_max is not None:
+        stmt = stmt.where(Video.size_bytes <= size_max * 1024 * 1024)
+    if date_from is not None:
+        stmt = stmt.where(Video.created_at >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(Video.created_at < date_to + timedelta(days=1))
     return stmt
 
 
@@ -203,18 +249,24 @@ def _video_count(
     untagged: bool = False,
     min_duration: float | None = None,
     max_duration: float | None = None,
+    size_min: float | None = None,
+    size_max: float | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    tag_match: str = "any",
 ) -> int:
     stmt = select(func.count(Video.id))
     if untagged:
         stmt = stmt.where(~Video.tags.any())
     elif tag_ids:
-        subq = (
-            select(VideoTag.video_id)
-            .where(VideoTag.tag_id.in_(tag_ids))
-            .group_by(VideoTag.video_id)
-            .subquery()
-        )
-        stmt = stmt.where(Video.id.in_(subq))
+        subq = select(VideoTag.video_id).where(VideoTag.tag_id.in_(tag_ids))
+        if tag_match == "all":
+            subq = subq.group_by(VideoTag.video_id).having(
+                func.count(VideoTag.tag_id) == len(tag_ids)
+            )
+        else:
+            subq = subq.distinct()
+        stmt = stmt.where(Video.id.in_(subq.subquery()))
     if q:
         q = q.strip()
         if q:
@@ -223,6 +275,14 @@ def _video_count(
         stmt = stmt.where(Video.duration_seconds >= min_duration)
     if max_duration is not None:
         stmt = stmt.where(Video.duration_seconds <= max_duration)
+    if size_min is not None:
+        stmt = stmt.where(Video.size_bytes >= size_min * 1024 * 1024)
+    if size_max is not None:
+        stmt = stmt.where(Video.size_bytes <= size_max * 1024 * 1024)
+    if date_from is not None:
+        stmt = stmt.where(Video.created_at >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(Video.created_at < date_to + timedelta(days=1))
     result = db.execute(stmt).scalar()
     return result or 0
 
