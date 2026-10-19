@@ -920,11 +920,115 @@ function togglePlay() {
   }
 
   playBtn?.addEventListener("click", togglePlay);
+
+  const SEEK_STEP_SECONDS = 5;
+  const DOUBLE_TAP_MS = 320;
+  const SEQUENCE_WINDOW_MS = 900;
+  const EDGE_RATIO = 0.3;
+  let seekHintTimer = null;
+
+  const seekHint = document.createElement("div");
+  seekHint.className = "player-seek-hint";
+  seekHint.hidden = true;
+  seekHint.setAttribute("aria-live", "polite");
+  wrapper.appendChild(seekHint);
+
+  let pendingTap = { side: 0, time: 0, timer: null };
+  let tapSequence = { active: false, count: 0, side: 0, lastTap: 0, startTime: 0, timer: null };
+
+  function showSeekHint(delta) {
+    seekHint.textContent = `${delta > 0 ? "+" : "\u2212"}${Math.abs(delta)} сек`;
+    seekHint.dataset.direction = delta > 0 ? "forward" : "back";
+    seekHint.hidden = false;
+    seekHint.classList.remove("is-visible");
+    void seekHint.offsetWidth;
+    seekHint.classList.add("is-visible");
+    clearTimeout(seekHintTimer);
+    seekHintTimer = setTimeout(() => {
+      seekHint.classList.remove("is-visible");
+      seekHint.hidden = true;
+    }, SEQUENCE_WINDOW_MS);
+  }
+
+  function hideSeekHint() {
+    clearTimeout(seekHintTimer);
+    seekHint.classList.remove("is-visible");
+    seekHint.hidden = true;
+  }
+
+  function seekToTime(origTime) {
+    const { startOff, origDur } = getTimeInfo();
+    const maxTime = origDur && isFinite(origDur) ? origDur : (video.duration || 0) + startOff;
+    if (!isFinite(maxTime) || maxTime <= 0) return;
+    const target = Math.max(0, Math.min(maxTime, origTime));
+    commitSeek(target);
+  }
+
+  function clearPendingTap() {
+    if (pendingTap.timer) clearTimeout(pendingTap.timer);
+    pendingTap = { side: 0, time: 0, timer: null };
+  }
+
+  function resetTapSequence() {
+    if (tapSequence.timer) clearTimeout(tapSequence.timer);
+    tapSequence = { active: false, count: 0, side: 0, lastTap: 0, startTime: 0, timer: null };
+    hideSeekHint();
+  }
+
+  function runTapSequence(side) {
+    tapSequence.count += 1;
+    tapSequence.lastTap = performance.now();
+    const delta = side * (tapSequence.count - 1) * SEEK_STEP_SECONDS;
+    seekToTime(tapSequence.startTime + delta);
+    showSeekHint(delta);
+    if (tapSequence.timer) clearTimeout(tapSequence.timer);
+    tapSequence.timer = setTimeout(resetTapSequence, SEQUENCE_WINDOW_MS);
+  }
+
   wrapper.addEventListener("click", (e) => {
     if (e.target.closest(".player-controls")) return;
     if (e.target.closest("[data-pc-rotate]")) return;
     if (document.querySelector("[data-player-loading].active")) return;
-    togglePlay();
+    if (e.target === seekHint) return;
+
+    const rect = wrapper.getBoundingClientRect();
+    if (!rect.width) return;
+    const x = e.clientX - rect.left;
+    const side = x < rect.width * EDGE_RATIO ? -1 : x > rect.width * (1 - EDGE_RATIO) ? 1 : 0;
+    const now = performance.now();
+
+    if (side === 0) {
+      clearPendingTap();
+      resetTapSequence();
+      togglePlay();
+      return;
+    }
+
+    if (tapSequence.active && tapSequence.side === side && now - tapSequence.lastTap <= SEQUENCE_WINDOW_MS) {
+      runTapSequence(side);
+      return;
+    }
+
+    if (pendingTap.timer && pendingTap.side === side && now - pendingTap.time <= DOUBLE_TAP_MS) {
+      clearPendingTap();
+      resetTapSequence();
+      const { startOff } = getTimeInfo();
+      tapSequence.active = true;
+      tapSequence.count = 1;
+      tapSequence.side = side;
+      tapSequence.startTime = (video.currentTime || 0) + startOff;
+      runTapSequence(side);
+      return;
+    }
+
+    clearPendingTap();
+    resetTapSequence();
+    pendingTap.side = side;
+    pendingTap.time = now;
+    pendingTap.timer = setTimeout(() => {
+      pendingTap = { side: 0, time: 0, timer: null };
+      togglePlay();
+    }, DOUBLE_TAP_MS);
   });
   video.addEventListener("play", updatePlayIcon);
   video.addEventListener("pause", updatePlayIcon);
@@ -948,6 +1052,7 @@ video.addEventListener("timeupdate", () => {
   seekInput?.addEventListener("input", () => {
     if (!seekInput) return;
     isSeeking = true;
+    video.dataset.seeking = "1";
     seekTrack?.classList.add("dragging");
     const { startOff, origDur } = getTimeInfo();
     const pct = parseFloat(seekInput.value) / 10;
@@ -976,7 +1081,10 @@ video.addEventListener("timeupdate", () => {
 
   function commitSeek(origTime) {
     if (video.dataset.seekRestarting) return;
-    seekTo(origTime);
+    const restarted = seekTo(origTime);
+    if (!restarted && typeof video.__cancelHlsSeek === "function") {
+      video.__cancelHlsSeek();
+    }
     updateSeek();
     updateTime();
   }
@@ -984,6 +1092,7 @@ video.addEventListener("timeupdate", () => {
   seekInput?.addEventListener("change", () => {
     if (!seekInput) return;
     isSeeking = false;
+    delete video.dataset.seeking;
     seekTrack?.classList.remove("dragging");
     const { origDur } = getTimeInfo();
     const origTime = (origDur * parseFloat(seekInput.value)) / 1000;
@@ -1152,7 +1261,6 @@ function wireQualitySelector() {
   let hls = null;
   let currentHeight = 0;
   let originalDuration = 0;
-  let startSec = 0;
   let pendingWasPaused = false;
 
   const loadingOverlay = document.querySelector("[data-player-loading]");
@@ -1171,33 +1279,105 @@ function wireQualitySelector() {
     if (loadingOverlay) loadingOverlay.classList.remove("active");
   }
 
+  const HLS_SETTLE_MS = 1000;
+  let pendingHls = null;
+  let pendingHlsTimer = null;
+  let hlsRequestId = 0;
+
+  function clearPendingHls() {
+    if (pendingHlsTimer) {
+      clearTimeout(pendingHlsTimer);
+      pendingHlsTimer = null;
+    }
+    pendingHls = null;
+  }
+
+  function queueHls(action) {
+    clearPendingHls();
+    pendingHls = action;
+    qualityLabel.textContent = "Processing...";
+    updateMenuActive(String(action.height));
+    pendingHlsTimer = setTimeout(runPendingHls, HLS_SETTLE_MS);
+  }
+
+  function runPendingHls() {
+    pendingHlsTimer = null;
+    if (!pendingHls) return;
+    if (video.dataset.seeking === "1") {
+      pendingHlsTimer = setTimeout(runPendingHls, HLS_SETTLE_MS);
+      return;
+    }
+    const action = pendingHls;
+    pendingHls = null;
+    if (!action) return;
+
+    if (action.type === "start") {
+      if (typeof Hls === "undefined") {
+        hideLoading();
+        qualityLabel.textContent = "Source";
+        updateMenuActive("0");
+        video.dataset.startSec = "0";
+        video.dataset.originalDuration = "0";
+        if (!action.wasPaused) video.play().catch(() => {});
+        return;
+      }
+      const position = Math.floor((video.currentTime || 0) + (parseFloat(video.dataset.startSec) || 0));
+      if (!originalDuration && video.duration) {
+        originalDuration = video.duration;
+      }
+      showLoading("Transcoding to " + action.height + "p\u2026");
+      initHls(action.height, position, action.wasPaused);
+      return;
+    }
+
+    if (video.dataset.seekRestarting) return;
+    video.dataset.seekRestarting = "1";
+    showLoading("Transcoding to " + action.height + "p\u2026");
+    if (hls) hls.stopLoad();
+    const requestId = ++hlsRequestId;
+    const height = action.height;
+    const startSecBase = Math.floor(parseFloat(video.dataset.startSec) || 0);
+    fetch("/hls/" + videoId + "/seek", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        height: height,
+        start_sec: startSecBase,
+        new_position: action.position
+      })
+    })
+    .then(r => {
+      if (!r.ok) throw new Error("Seek failed");
+      return r.json();
+    })
+    .then(data => {
+      if (requestId !== hlsRequestId) return;
+      const serverDur = parseFloat(data.original_duration);
+      if (serverDur > 0) originalDuration = serverDur;
+      delete video.dataset.seekRestarting;
+      initHls(height, data.start_sec, action.wasPaused);
+    })
+    .catch(() => {
+      if (requestId !== hlsRequestId) return;
+      delete video.dataset.seekRestarting;
+      hideLoading();
+      switchToSource();
+    });
+  }
+
   function selectByHeight(height) {
     qualityMenu.hidden = true;
     if (height === 0) {
+      clearPendingHls();
       switchToSource();
       return;
     }
-    const savedTime = Math.floor((video.currentTime || 0) + (parseFloat(video.dataset.startSec) || 0));
-    const wasPaused = video.paused;
-    qualityLabel.textContent = "Processing...";
-    updateMenuActive(String(height));
-    showLoading("Transcoding to " + height + "p\u2026");
-    if (typeof Hls === "undefined") {
-      hideLoading();
-      qualityLabel.textContent = "Source";
-      updateMenuActive("0");
-      video.dataset.startSec = "0";
-      video.dataset.originalDuration = "0";
-      if (!wasPaused) video.play().catch(() => {});
-      return;
-    }
-    if (!originalDuration && video.duration) {
-      originalDuration = video.duration;
-    }
-    initHls(height, savedTime, wasPaused);
+    queueHls({ type: "start", height, wasPaused: pendingHls ? pendingHls.wasPaused : video.paused });
   }
 
   function switchToSource() {
+    clearPendingHls();
+    hlsRequestId += 1;
     hideLoading();
     const realPos = (video.currentTime || 0) + (parseFloat(video.dataset.startSec) || 0);
     destroyHls();
@@ -1291,6 +1471,8 @@ function wireQualitySelector() {
 
     hls.on(Hls.Events.ERROR, (event, data) => {
       if (!data.fatal) return;
+      clearPendingHls();
+      hlsRequestId += 1;
       hideLoading();
       destroyHls();
       currentHeight = 0;
@@ -1307,39 +1489,19 @@ function wireQualitySelector() {
 
   video.__restartHls = function(position) {
     if (!currentHeight || !hls || video.dataset.seekRestarting) return;
-    video.dataset.seekRestarting = "1";
-
-    showLoading("Transcoding to " + currentHeight + "p\u2026");
-    qualityLabel.textContent = "Processing...";
-
-    if (hls) hls.stopLoad();
-
-    startSec = Math.floor(parseFloat(video.dataset.startSec) || 0);
-
-    fetch("/hls/" + videoId + "/seek", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        height: currentHeight,
-        start_sec: startSec,
-        new_position: position
-      })
-    })
-    .then(r => {
-      if (!r.ok) throw new Error("Seek failed");
-      return r.json();
-    })
-    .then(data => {
-      const serverDur = parseFloat(data.original_duration);
-      if (serverDur > 0) originalDuration = serverDur;
-      delete video.dataset.seekRestarting;
-      initHls(currentHeight, data.start_sec, false);
-    })
-    .catch(() => {
-      delete video.dataset.seekRestarting;
-      hideLoading();
-      switchToSource();
+    queueHls({
+      type: "restart",
+      height: pendingHls && pendingHls.height ? pendingHls.height : currentHeight,
+      position: position,
+      wasPaused: pendingHls ? pendingHls.wasPaused : video.paused
     });
+  };
+
+  video.__cancelHlsSeek = function() {
+    if (!pendingHls || pendingHls.type !== "restart") return;
+    clearPendingHls();
+    hideLoading();
+    updateLabel();
   };
 
   video.src = "/media/" + videoId;

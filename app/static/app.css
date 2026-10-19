@@ -902,6 +902,7 @@ html[data-theme="dark"] .video-card:hover {
   border-radius: 8px;
   overflow: hidden;
   background: #000;
+  touch-action: manipulation;
 }
 
 .player {
@@ -1350,6 +1351,37 @@ html[data-theme="dark"] .video-card:hover {
   gap: 4px;
   pointer-events: none;
   z-index: 4;
+}
+
+.player-seek-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 6;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.96);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.player-seek-hint[data-direction="back"] {
+  left: 18%;
+}
+
+.player-seek-hint[data-direction="forward"] {
+  left: 82%;
+}
+
+.player-seek-hint.is-visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .ps-cue {
