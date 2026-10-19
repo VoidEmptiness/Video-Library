@@ -128,22 +128,31 @@
     </form>
   </section>
 
-  <section class="panel">
+  <section class="panel subtitles-panel">
     <div class="panel-title">
       <h2>Субтитры</h2>
-      <p>Дорожки, встроенные в видео, определяются автоматически. Ручная загрузка скрыта, но доступна для расширенных случаев.</p>
+      <p>Встроенные дорожки из видео определяются автоматически. Если нужной дорожки нет, добавьте файл .srt или .vtt.</p>
+    </div>
+
+    <div class="subtitle-block-head">
+      <h3>Доступные дорожки</h3>
+      {% if subtitles %}<span class="subtitle-count">{{ subtitles|length }}</span>{% endif %}
     </div>
 
     {% if subtitles %}
     <ul class="subtitle-list" data-subtitle-list>
       {% for s in subtitles %}
       <li class="subtitle-item">
-        <span class="subtitle-name">{{ s.label }}</span>
+        <span class="subtitle-kind" aria-hidden="true">CC</span>
+        <span class="subtitle-info">
+          <span class="subtitle-name">{{ s.label }}</span>
+          <span class="subtitle-meta">
+            {% if s.kind == "uploaded" %}загруженный файл · {{ s.original_name }}{% else %}встроена в видео{% endif %}
+          </span>
+        </span>
         {% if s.is_default %}<span class="pill">по умолчанию</span>{% endif %}
-        {% if s.kind == "embedded" %}<span class="pill pill--muted">в видео</span>{% endif %}
-        <span class="subtitle-meta">{% if s.kind == "uploaded" %}{{ s.original_name }}{% else %}встроенная дорожка{% endif %}</span>
+        {% if s.kind == "uploaded" %}
         <span class="subtitle-actions">
-          {% if s.kind == "uploaded" %}
           {% if not s.is_default %}
           <form method="post" action="/videos/{{ video.id }}/subtitles/{{ s.id }}/default">
             <button class="button compact secondary" type="submit">По умолчанию</button>
@@ -152,27 +161,36 @@
           <form method="post" action="/videos/{{ video.id }}/subtitles/{{ s.id }}/delete" data-confirm="Удалить субтитры?">
             <button class="button compact danger" type="submit">Удалить</button>
           </form>
-          {% endif %}
         </span>
+        {% endif %}
       </li>
       {% endfor %}
     </ul>
     {% else %}
-    <p class="empty-inline">Субтитры не найдены</p>
+    <p class="empty-inline subtitle-empty">Пока нет доступных дорожек. Встроенные субтитры появятся здесь автоматически, или добавьте файл ниже.</p>
     {% endif %}
 
-    <details class="subtitle-manual">
-      <summary>Загрузить субтитры вручную (.srt / .vtt)</summary>
-      <form method="post" action="/videos/{{ video.id }}/subtitles" enctype="multipart/form-data" class="form-stack subtitle-upload">
-        <label class="field">
-          <span>Название (язык или метка)</span>
-          <input type="text" name="labels" placeholder="Например: Русский" />
-        </label>
-        <label class="field">
-          <span>Файлы (.srt / .vtt)</span>
-          <input type="file" name="files" accept=".srt,.vtt,text/vtt" multiple />
-        </label>
-        <button class="button" type="submit">Загрузить субтитры</button>
+    <details class="subtitle-manual"{% if not subtitles %} open{% endif %}>
+      <summary>Добавить файл субтитров</summary>
+      <form method="post" action="/videos/{{ video.id }}/subtitles" enctype="multipart/form-data" class="form-stack subtitle-upload" data-subtitle-form>
+        <div class="subtitle-upload-fields">
+          <label class="field">
+            <span>Название дорожки <em>необязательно</em></span>
+            <input type="text" name="labels" placeholder="Например: Русский" />
+          </label>
+          <div class="field">
+            <span>Файлы субтитров</span>
+            <div class="file-picker subtitle-file-picker">
+              <input type="file" name="files" accept=".srt,.vtt,text/vtt" multiple data-subtitle-file-input />
+              <button type="button" class="button secondary" data-subtitle-file-btn>Выбрать файлы</button>
+              <span class="file-picker-name" data-subtitle-file-name>Файлы не выбраны</span>
+            </div>
+            <span class="field-hint">Поддерживаются .srt и .vtt. Можно выбрать несколько файлов.</span>
+          </div>
+        </div>
+        <div class="subtitle-upload-actions">
+          <button class="button" type="submit">Загрузить субтитры</button>
+        </div>
       </form>
     </details>
   </section>

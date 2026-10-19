@@ -1751,6 +1751,36 @@ function wireFilePicker() {
   });
 }
 
+function wireSubtitleFilePicker() {
+  const form = document.querySelector("[data-subtitle-form]");
+  const input = document.querySelector("[data-subtitle-file-input]");
+  const btn = document.querySelector("[data-subtitle-file-btn]");
+  const label = document.querySelector("[data-subtitle-file-name]");
+  if (!form || !input || !btn || !label) return;
+
+  btn.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => {
+    const files = input.files;
+    if (!files || files.length === 0) {
+      label.textContent = "Файлы не выбраны";
+      label.removeAttribute("title");
+    } else if (files.length === 1) {
+      label.textContent = files[0].name;
+      label.title = files[0].name;
+    } else {
+      label.textContent = `Выбрано файлов: ${files.length}`;
+      label.title = Array.from(files).map((file) => file.name).join("\n");
+    }
+  });
+
+  form.addEventListener("submit", (event) => {
+    if (!input.files || input.files.length === 0) {
+      event.preventDefault();
+      showToast("Выберите хотя бы один файл субтитров");
+    }
+  });
+}
+
 function wireCustomValidation() {
   document.addEventListener("submit", function (event) {
     const form = event.target;
@@ -1787,6 +1817,7 @@ document.addEventListener("DOMContentLoaded", () => {
   wireSubtitles();
   wireToast();
   wireFilePicker();
+  wireSubtitleFilePicker();
   wireDialogConfirms();
   wireCustomValidation();
 });
