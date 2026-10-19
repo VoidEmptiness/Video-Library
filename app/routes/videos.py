@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import io
 import logging
-import os
-import zipfile
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -18,6 +14,7 @@ from ..database import get_db
 from ..models import Tag, Video
 from ..services.storage import THUMB_DIR, delete_subtitle_files, ensure_dirs, unique_storage_name, video_path
 from ..services.thumbnails import generate_all_thumbnails
+from ..services.zipstream import stream_zip
 from ..services.utils import (
     _all_tags,
     _delete_video_files,
@@ -384,21 +381,32 @@ def download_selected_videos(
     if not video_ids:
         raise HTTPException(status_code=400, detail="No videos selected")
 
-    videos = list(db.scalars(select(Video).where(Video.id.in_(video_ids))))
-    if not videos:
+    unique_ids = list(dict.fromkeys(video_ids))
+    videos = list(db.scalars(select(Video).where(Video.id.in_(unique_ids))))
+    by_id = {video.id: video for video in videos}
+    if not by_id:
         raise HTTPException(status_code=404, detail="Videos not found")
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for video in videos:
-            path = video_path(video.filename)
-            if path.exists():
-                zf.write(str(path), video.original_name)
+    entries: list[tuple[Path, str]] = []
+    for video_id in unique_ids:
+        video = by_id.get(video_id)
+        if video is None:
+            continue
+        path = video_path(video.filename)
+        if path.exists():
+            entries.append((path, video.original_name))
 
-    return Response(
-        content=buf.getvalue(),
+    if not entries:
+        raise HTTPException(status_code=404, detail="Files missing on disk")
+
+    logger.info("Streaming %d video(s) as zip: %s", len(entries), [name for _, name in entries])
+    return StreamingResponse(
+        stream_zip(entries),
         media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="videos.zip"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="videos.zip"',
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
