@@ -150,14 +150,8 @@
             {% if s.kind == "uploaded" %}загруженный файл · {{ s.original_name }}{% else %}встроена в видео{% endif %}
           </span>
         </span>
-        {% if s.is_default %}<span class="pill">по умолчанию</span>{% endif %}
         {% if s.kind == "uploaded" %}
         <span class="subtitle-actions">
-          {% if not s.is_default %}
-          <form method="post" action="/videos/{{ video.id }}/subtitles/{{ s.id }}/default">
-            <button class="button compact secondary" type="submit">По умолчанию</button>
-          </form>
-          {% endif %}
           <form method="post" action="/videos/{{ video.id }}/subtitles/{{ s.id }}/delete" data-confirm="Удалить субтитры?">
             <button class="button compact danger" type="submit">Удалить</button>
           </form>

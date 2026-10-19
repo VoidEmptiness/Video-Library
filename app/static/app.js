@@ -1534,13 +1534,58 @@ function wireSubtitles() {
   const videoId = shell.dataset.videoId;
   if (!videoId) return;
 
-  const STORE_KEY = "vl.subtitles.track";
+  const STORE_KEY = "vl.subtitles.track." + videoId;
+  const STORE_TTL_MS = 5 * 60 * 1000;
+  const STORE_HEARTBEAT_MS = 30 * 1000;
   let tracks = [];
   let activeTrack = null;
   let lastTrack = null;
   let cues = [];
   let lastRendered = -1;
   let lastSignature = "";
+
+  function readSavedTrack() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || typeof data.key !== "string" || !Number.isFinite(data.lastSeen)) {
+        localStorage.removeItem(STORE_KEY);
+        return null;
+      }
+      if (Date.now() - data.lastSeen > STORE_TTL_MS) {
+        localStorage.removeItem(STORE_KEY);
+        return null;
+      }
+      return tracks.find((t) => t.key === data.key) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveTrack(track) {
+    try {
+      if (!track) {
+        localStorage.removeItem(STORE_KEY);
+        return;
+      }
+      localStorage.setItem(STORE_KEY, JSON.stringify({ key: track.key, lastSeen: Date.now() }));
+    } catch {}
+  }
+
+  function touchSavedTrack() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data || typeof data.key !== "string") return;
+      localStorage.setItem(STORE_KEY, JSON.stringify({ key: data.key, lastSeen: Date.now() }));
+    } catch {}
+  }
+
+  setInterval(touchSavedTrack, STORE_HEARTBEAT_MS);
+  window.addEventListener("pagehide", touchSavedTrack);
+  window.addEventListener("pageshow", touchSavedTrack);
 
   function parseTs(ts) {
     const t = ts.trim().replace(",", ".");
@@ -1646,9 +1691,9 @@ function wireSubtitles() {
     lastSignature = "";
     overlay.innerHTML = "";
     if (!track) {
-      localStorage.removeItem(STORE_KEY);
+      saveTrack(null);
     } else {
-      localStorage.setItem(STORE_KEY, track.key);
+      saveTrack(track);
       fetch(track.url)
         .then((r) => {
           if (!r.ok) throw new Error("VTT load failed");
@@ -1662,7 +1707,7 @@ function wireSubtitles() {
         .catch(() => {
           if (activeTrack === track) {
             activeTrack = null;
-            localStorage.removeItem(STORE_KEY);
+            saveTrack(null);
             updateMenuUI();
             render(true);
           }
@@ -1686,7 +1731,7 @@ function wireSubtitles() {
       btn.type = "button";
       btn.className = "pc-cc-opt";
       btn.dataset.pcCcOpt = tr.key;
-      btn.textContent = tr.label + (tr.is_default ? " (по умолчанию)" : "");
+      btn.textContent = tr.label;
       btn.addEventListener("click", () => { loadTrack(tr); ccMenu.hidden = true; });
       ccMenu.appendChild(btn);
     }
@@ -1703,12 +1748,8 @@ function wireSubtitles() {
       if (!tracks.length) return;
       ccBtn.hidden = false;
       buildMenu();
-      const savedKey = localStorage.getItem(STORE_KEY);
-      const initial =
-        tracks.find((t) => t.key === savedKey) ||
-        tracks.find((t) => t.is_default) ||
-        null;
-      if (initial) loadTrack(initial);
+      const saved = readSavedTrack();
+      if (saved) loadTrack(saved);
     })
     .catch(() => {});
 
@@ -1734,11 +1775,7 @@ function wireSubtitles() {
     if (activeTrack) {
       loadTrack(null);
     } else {
-      const next =
-        lastTrack ||
-        tracks.find((t) => t.key === localStorage.getItem(STORE_KEY)) ||
-        tracks.find((t) => t.is_default) ||
-        tracks[0];
+      const next = lastTrack || readSavedTrack() || tracks[0];
       if (next) loadTrack(next);
     }
   });
