@@ -1392,6 +1392,20 @@ function wireSubtitles() {
     return sec;
   }
 
+  const entityDecoder = document.createElement("textarea");
+  function decodeEntities(value) {
+    entityDecoder.innerHTML = value;
+    return entityDecoder.value;
+  }
+
+  function cleanCueText(value) {
+    return decodeEntities(
+      value
+        .replace(/<\d{1,2}:\d{2}(?::\d{2})?[.,]\d{1,3}>/g, "")
+        .replace(/<\/?[a-zA-Z][^>]*>/g, "")
+    ).trim();
+  }
+
   function parseVtt(text) {
     const cuesOut = [];
     let cue = null;
@@ -1405,7 +1419,10 @@ function wireSubtitles() {
         continue;
       }
       if (cue) {
-        if (!line.startsWith("WEBVTT") && !line.startsWith("NOTE")) lines.push(line);
+        if (!line.startsWith("WEBVTT") && !line.startsWith("NOTE")) {
+          const cleaned = cleanCueText(line);
+          if (cleaned) lines.push(cleaned);
+        }
         continue;
       }
       const m = line.match(/(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3})/);
