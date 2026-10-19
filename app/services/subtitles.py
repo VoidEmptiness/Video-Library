@@ -178,6 +178,7 @@ def extract_embedded_subtitle(
     with _extraction_lock(video_id, stream_index):
         if dest.exists() and dest.stat().st_size > 0:
             return dest
+        dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_suffix(".tmp.vtt")
         cmd = [
             str(FFMPEG_EXE),
