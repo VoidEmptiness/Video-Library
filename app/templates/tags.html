@@ -11,6 +11,9 @@
   </section>
 
   <section class="panel">
+    {% if error %}
+      <div class="alert" role="alert">{{ error }}</div>
+    {% endif %}
     <form method="post" action="/tags/create" class="create-row" novalidate data-custom-validate>
       <label class="field grow">
         <span>Новый тег</span>

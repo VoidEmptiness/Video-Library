@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -16,6 +17,10 @@ from .auth import AdminUserHTML
 router = APIRouter()
 
 
+def _clean_tag_name(name: str) -> str:
+    return name.strip().lstrip("#").strip()
+
+
 @router.get("/tags", response_class=HTMLResponse)
 def tags_page(
     request: Request,
@@ -25,7 +30,12 @@ def tags_page(
     tags = list(db.scalars(select(Tag).order_by(Tag.name)))
     return templates.TemplateResponse(
         "tags.html",
-        {"request": request, "title": f"{APP_TITLE} \u2014 Теги", "tags": tags},
+        {
+            "request": request,
+            "title": f"{APP_TITLE} \u2014 Теги",
+            "tags": tags,
+            "error": request.query_params.get("error"),
+        },
     )
 
 
@@ -36,12 +46,13 @@ def tag_create(
     _: AdminUserHTML,
     description: Annotated[str | None, Form()] = None,
 ):
-    name = name.strip()
+    name = _clean_tag_name(name)
     if not name:
         raise HTTPException(status_code=400, detail="Empty name")
     exists = db.scalar(select(func.count()).select_from(Tag).where(Tag.name == name))
     if exists > 0:
-        return _redirect("/tags")
+        message = quote(f"Тег «{name}» уже существует")
+        return _redirect(f"/tags?error={message}")
     description_clean = description.strip() if description else None
     db.add(Tag(name=name, description=description_clean or None))
     db.commit()
@@ -59,7 +70,7 @@ def tag_edit(
     tag = db.get(Tag, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-    name = name.strip()
+    name = _clean_tag_name(name)
     if name:
         tag.name = name
     tag.description = description.strip() if description else None
