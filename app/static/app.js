@@ -81,8 +81,6 @@ function wireBulkActions() {
   const count = form?.querySelector("[data-selected-count]");
   const deleteButton = form?.querySelector("[data-delete-selected]");
   const downloadButton = form?.querySelector("[data-download-selected]");
-  const downloadProgress = form?.querySelector("[data-download-progress]");
-  const downloadProgressLabel = form?.querySelector("[data-download-progress-label]");
   const selectAll = form?.querySelector("[data-select-all]");
   const selectClear = form?.querySelector("[data-select-clear]");
   const checks = Array.from(form?.querySelectorAll("[data-video-select]") || []);
@@ -150,6 +148,7 @@ function wireBulkActions() {
   });
 
   form.addEventListener("submit", async (event) => {
+    if (event.submitter === downloadButton) return;
     const total = selectedCount();
     if (total === 0) {
       event.preventDefault();
@@ -160,53 +159,6 @@ function wireBulkActions() {
     if (ok) {
       form.removeAttribute("data-confirm");
       form.submit();
-    }
-  });
-
-  downloadButton?.addEventListener("click", async () => {
-    const ids = checks.filter((c) => c.checked).map((c) => c.value);
-    if (ids.length === 0) return;
-
-    downloadButton.disabled = true;
-    if (bulkTagsBtn) bulkTagsBtn.disabled = true;
-    if (deleteButton) deleteButton.disabled = true;
-    if (selectAll) selectAll.disabled = true;
-    if (selectClear) selectClear.disabled = true;
-    for (const check of checks) check.disabled = true;
-    if (downloadProgress) downloadProgress.hidden = false;
-
-    const formData = new FormData();
-    for (const id of ids) formData.append("video_ids", id);
-
-    try {
-      const resp = await fetch("/videos/download-selected", {
-        method: "POST",
-        body: formData,
-      });
-      if (!resp.ok) {
-        showAlert("Ошибка при скачивании");
-        return;
-      }
-
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "videos.zip";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      showAlert("Ошибка при скачивании");
-    } finally {
-      if (downloadProgress) downloadProgress.hidden = true;
-      for (const check of checks) check.disabled = false;
-      if (bulkTagsBtn) bulkTagsBtn.disabled = false;
-      if (deleteButton) deleteButton.disabled = false;
-      if (selectAll) selectAll.disabled = false;
-      if (selectClear) selectClear.disabled = false;
-      syncBulkUi();
     }
   });
 

@@ -533,17 +533,6 @@ html[data-theme="dark"] .brand-mark {
   font-size: 13px;
 }
 
-.download-progress[hidden] {
-  display: none;
-}
-
-.download-progress-label {
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
-  padding: 0 4px;
-}
-
 .form-stack {
   display: grid;
   gap: 14px;

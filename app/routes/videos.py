@@ -14,7 +14,7 @@ from ..database import get_db
 from ..models import Tag, Video
 from ..services.storage import THUMB_DIR, delete_subtitle_files, ensure_dirs, unique_storage_name, video_path
 from ..services.thumbnails import generate_all_thumbnails
-from ..services.zipstream import stream_zip
+from ..services.zipstream import archive_size, stream_zip
 from ..services.utils import (
     _all_tags,
     _delete_video_files,
@@ -399,14 +399,28 @@ def download_selected_videos(
     if not entries:
         raise HTTPException(status_code=404, detail="Files missing on disk")
 
+    if len(entries) == 1:
+        path, name = entries[0]
+        logger.info("Serving single video directly: %s", name)
+        return FileResponse(
+            path=str(path),
+            media_type="application/octet-stream",
+            filename=name,
+        )
+
     logger.info("Streaming %d video(s) as zip: %s", len(entries), [name for _, name in entries])
+    headers = {
+        "Content-Disposition": 'attachment; filename="videos.zip"',
+        "X-Accel-Buffering": "no",
+    }
+    try:
+        headers["Content-Length"] = str(archive_size(entries))
+    except OSError:
+        logger.warning("Could not size archive, streaming without Content-Length")
     return StreamingResponse(
         stream_zip(entries),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": 'attachment; filename="videos.zip"',
-            "X-Accel-Buffering": "no",
-        },
+        headers=headers,
     )
 
 

@@ -10,6 +10,16 @@ from typing import Iterable, Iterator
 _READ_CHUNK = 1024 * 1024
 _QUEUE_SIZE = 8
 
+_ZIP64_LIMIT = (1 << 31) - 1
+_MAX_ENTRIES = 0xFFFF
+_LOCAL_HEADER_SIZE = 30
+_LOCAL_ZIP64_EXTRA_SIZE = 20
+_DATA_DESCRIPTOR_SIZE = 24
+_CENTRAL_HEADER_SIZE = 46
+_END_RECORD_SIZE = 22
+_ZIP64_END_RECORD_SIZE = 56
+_ZIP64_LOCATOR_SIZE = 20
+
 
 class _ClientGone(Exception):
     pass
@@ -46,6 +56,41 @@ def _zip_datetime(path: Path) -> tuple[int, int, int, int, int, int]:
     if value.year < 1980:
         value = value.replace(year=1980, month=1, day=1, hour=0, minute=0, second=0)
     return (value.year, value.month, value.day, value.hour, value.minute, value.second)
+
+
+def _arcname_size(arcname: str) -> int:
+    name = zipfile.ZipInfo(arcname).filename
+    try:
+        return len(name.encode("ascii"))
+    except UnicodeEncodeError:
+        return len(name.encode("utf-8"))
+
+
+def archive_size(entries: Iterable[tuple[Path, str]]) -> int:
+    offset = 0
+    central = 0
+    count = 0
+    for source, arcname in entries:
+        name_size = _arcname_size(arcname)
+        size = source.stat().st_size
+        extra = 0
+        if size > _ZIP64_LIMIT:
+            extra += 16
+        if offset > _ZIP64_LIMIT:
+            extra += 8
+        central += _CENTRAL_HEADER_SIZE + name_size + (4 + extra if extra else 0)
+        offset += (
+            _LOCAL_HEADER_SIZE
+            + name_size
+            + _LOCAL_ZIP64_EXTRA_SIZE
+            + size
+            + _DATA_DESCRIPTOR_SIZE
+        )
+        count += 1
+    trailer = _END_RECORD_SIZE
+    if count > _MAX_ENTRIES or offset > _ZIP64_LIMIT or central > _ZIP64_LIMIT:
+        trailer += _ZIP64_END_RECORD_SIZE + _ZIP64_LOCATOR_SIZE
+    return offset + central + trailer
 
 
 def stream_zip(entries: Iterable[tuple[Path, str]]) -> Iterator[bytes]:
