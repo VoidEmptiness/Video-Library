@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import io
 import logging
 import os
-import zipfile
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from pathlib import PurePath
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,6 +18,7 @@ from ..models import Video
 from ..services.storage import THUMB_DIR, video_path
 from ..services.utils import _is_text_file, _redirect, _probe_video_metadata
 from ..services.thumbnails import generate_all_thumbnails
+from ..services.zipstream import archive_size, stream_zip
 from .auth import AdminUser, AdminUserHTML
 
 logger = logging.getLogger(__name__)
@@ -94,6 +93,22 @@ def _safe_file_path(filename: str, subpath: str = "") -> Path:
     return full
 
 
+def _stream_zip_response(entries: list[tuple[Path, str]], filename: str) -> StreamingResponse:
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Accel-Buffering": "no",
+    }
+    try:
+        headers["Content-Length"] = str(archive_size(entries))
+    except OSError:
+        logger.warning("Could not size archive %s, streaming without Content-Length", filename)
+    return StreamingResponse(
+        stream_zip(entries),
+        media_type="application/zip",
+        headers=headers,
+    )
+
+
 def _rmtree(path: Path):
     if path.is_dir():
         for child in path.iterdir():
@@ -166,20 +181,15 @@ def admin_download_all(
             status_code=303,
         )
 
-    buf = io.BytesIO()
     name_part = subpath.replace("/", "_") if subpath else "_data"
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _dirs, files in os.walk(target):
-            root_path = Path(root)
-            for fn in files:
-                fp = root_path / fn
-                arcname = str(fp.relative_to(target))
-                zf.write(str(fp), arcname)
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{name_part}.zip"'},
-    )
+    entries: list[tuple[Path, str]] = []
+    for root, _dirs, files in os.walk(target):
+        root_path = Path(root)
+        for fn in files:
+            fp = root_path / fn
+            entries.append((fp, str(fp.relative_to(target))))
+    logger.info("Streaming %d file(s) from %s as zip", len(entries), subpath or "_data")
+    return _stream_zip_response(entries, f"{name_part}.zip")
 
 
 @router.post("/admin/download-selected")
@@ -191,26 +201,32 @@ def admin_download_selected(
     if not selected:
         raise HTTPException(status_code=400, detail="No files selected")
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in selected:
-            fpath = _safe_file_path(name, path)
-            if not fpath.exists():
-                continue
-            if fpath.is_file():
-                zf.write(str(fpath), name)
-            elif fpath.is_dir():
-                for root, _dirs, files in os.walk(fpath):
-                    root_path = Path(root)
-                    for fn in files:
-                        fp = root_path / fn
-                        arcname = str(Path(name) / fp.relative_to(fpath))
-                        zf.write(str(fp), arcname)
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="_data_selected.zip"'},
-    )
+    entries: list[tuple[Path, str]] = []
+    for name in selected:
+        fpath = _safe_file_path(name, path)
+        if not fpath.exists():
+            continue
+        if fpath.is_file():
+            entries.append((fpath, name))
+        elif fpath.is_dir():
+            for root, _dirs, files in os.walk(fpath):
+                root_path = Path(root)
+                for fn in files:
+                    fp = root_path / fn
+                    entries.append((fp, str(Path(name) / fp.relative_to(fpath))))
+    if not entries:
+        raise HTTPException(status_code=404, detail="Files missing on disk")
+
+    if len(entries) == 1:
+        entry_path, entry_name = entries[0]
+        return FileResponse(
+            path=str(entry_path),
+            media_type="application/octet-stream",
+            filename=entry_name,
+        )
+
+    logger.info("Streaming %d selected file(s) as zip", len(entries))
+    return _stream_zip_response(entries, "_data_selected.zip")
 
 
 @router.post("/admin/upload")
@@ -247,18 +263,13 @@ def admin_download_dir(
     if not fpath.exists() or not fpath.is_dir():
         raise HTTPException(status_code=404, detail="Directory not found")
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _dirs, files in os.walk(fpath):
-            for fn in files:
-                fp = Path(root) / fn
-                arcname = str(fp.relative_to(fpath))
-                zf.write(str(fp), arcname)
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{dirname}.zip"'},
-    )
+    entries: list[tuple[Path, str]] = []
+    for root, _dirs, files in os.walk(fpath):
+        for fn in files:
+            fp = Path(root) / fn
+            entries.append((fp, str(fp.relative_to(fpath))))
+    logger.info("Streaming directory %s (%d file(s)) as zip", dirname, len(entries))
+    return _stream_zip_response(entries, f"{dirname}.zip")
 
 
 @router.post("/admin/delete/{filename}")

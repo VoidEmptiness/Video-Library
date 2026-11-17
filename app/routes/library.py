@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import os
 import shutil
@@ -10,7 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -19,6 +18,7 @@ from ..models import Tag, Video
 from ..services.storage import ensure_dirs, video_path
 from ..services.subtitles import _embedded_streams, extract_all_embedded_subtitles
 from ..services.utils import _redirect
+from ..services.zipstream import archive_size, stream_zip
 from .auth import AdminUser, AdminUserHTML
 
 router = APIRouter()
@@ -37,27 +37,46 @@ def library_export(
         .scalars()
     )
     meta = []
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
-        for video in videos:
-            src = video_path(video.filename)
-            if src.exists():
-                zf.write(str(src), video.filename)
-            meta.append({
-                "filename": video.filename,
-                "original_name": video.original_name,
-                "content_type": video.content_type,
-                "size_bytes": video.size_bytes,
-                "created_at": video.created_at.isoformat() if video.created_at else None,
-                "tags": [
-                    {"name": t.name, "description": t.description} for t in video.tags
-                ],
-            })
-        zf.writestr("library.json", json.dumps(meta, ensure_ascii=False, indent=2))
-    return Response(
-        content=buf.getvalue(),
+    entries: list[tuple[Path, str]] = []
+    for video in videos:
+        src = video_path(video.filename)
+        if src.exists():
+            entries.append((src, video.filename))
+        meta.append({
+            "filename": video.filename,
+            "original_name": video.original_name,
+            "content_type": video.content_type,
+            "size_bytes": video.size_bytes,
+            "created_at": video.created_at.isoformat() if video.created_at else None,
+            "tags": [
+                {"name": t.name, "description": t.description} for t in video.tags
+            ],
+        })
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="library-export-"))
+    json_path = tmpdir / "library.json"
+    json_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    entries.append((json_path, "library.json"))
+
+    headers = {
+        "Content-Disposition": 'attachment; filename="library.zip"',
+        "X-Accel-Buffering": "no",
+    }
+    try:
+        headers["Content-Length"] = str(archive_size(entries))
+    except OSError:
+        pass
+
+    def _iter():
+        try:
+            yield from stream_zip(entries)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return StreamingResponse(
+        _iter(),
         media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="library.zip"'},
+        headers=headers,
     )
 
 
